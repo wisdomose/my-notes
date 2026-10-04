@@ -140,20 +140,46 @@ class VoiceController extends ChangeNotifier {
     notifyListeners();
   }
 
-  /// Asks for the microphone (and notifications, for the service).
-  Future<bool> ensurePermissions() async {
+  Future<bool>? _permissionRequest;
+  bool _askedNotifications = false;
+
+  /// Makes sure we may use the microphone, asking at most once at a time
+  /// (overlapping Android permission requests can leave one hanging forever).
+  Future<bool> ensurePermissions() => _permissionRequest ??= _ensureMic()
+      .whenComplete(() => _permissionRequest = null);
+
+  Future<bool> _ensureMic() async {
     final recorder = AudioRecorder();
-    final granted = await recorder.hasPermission();
-    await recorder.dispose();
-    if (!granted) {
-      _addLog('microphone permission denied');
-      return false;
+    try {
+      if (await recorder.hasPermission(request: false)) return true;
+      _addLog('asking for microphone permission');
+      final granted = await recorder.hasPermission();
+      _addLog('microphone permission ${granted ? 'granted' : 'denied'}');
+      return granted;
+    } finally {
+      await recorder.dispose();
     }
-    if (await FlutterForegroundTask.checkNotificationPermission() !=
-        NotificationPermission.granted) {
-      await FlutterForegroundTask.requestNotificationPermission();
-    }
-    return true;
+  }
+
+  /// Notifications only make the "Listening" notification visible; the
+  /// service works without them, so this never blocks anything.
+  void _askNotificationsOnce() {
+    if (_askedNotifications) return;
+    _askedNotifications = true;
+    () async {
+      try {
+        if (await FlutterForegroundTask.checkNotificationPermission() ==
+            NotificationPermission.granted) {
+          return;
+        }
+        _addLog('asking for notification permission');
+        final result =
+            await FlutterForegroundTask.requestNotificationPermission();
+        _addLog('notification permission: ${result.name}');
+      } catch (e) {
+        _addLog('notification permission check failed: $e');
+      }
+    }();
   }
 
   /// Starts the service once, even if called from several places at once
@@ -195,6 +221,7 @@ class VoiceController extends ChangeNotifier {
     if (!settings.wakeEnabled) return;
     if (!await ensurePermissions()) return;
     await _startService();
+    _askNotificationsOnce();
   }
 
   Future<void> setWakeEnabled(bool enabled) async {
@@ -240,7 +267,9 @@ class VoiceController extends ChangeNotifier {
       return true;
     }
     await FlutterForegroundTask.saveData(key: Msg.pendingStartKey, value: true);
-    return _startService();
+    final ok = await _startService();
+    _askNotificationsOnce();
+    return ok;
   }
 
   void stopCapture() => FlutterForegroundTask.sendDataToTask({'cmd': Msg.stop});
