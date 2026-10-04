@@ -126,8 +126,15 @@ class _ListeningScreenState extends State<ListeningScreen>
                   ),
                 ),
                 const Spacer(flex: 2),
-                _rings(level, transcribing),
-                const SizedBox(height: 40),
+                // Shrinks on small screens instead of overflowing.
+                Flexible(
+                  flex: 8,
+                  child: FittedBox(
+                    fit: BoxFit.scaleDown,
+                    child: _rings(level, transcribing),
+                  ),
+                ),
+                const SizedBox(height: 32),
                 Text(
                   transcribing ? 'Saving your note…' : 'I’m listening…',
                   style: display(30),
@@ -149,31 +156,34 @@ class _ListeningScreenState extends State<ListeningScreen>
                   )
                 else
                   Waveform(levels: _voice.levels),
-                const SizedBox(height: 28),
-                SizedBox(
-                  height: 120,
-                  child: SingleChildScrollView(
-                    reverse: true,
-                    child: Text(
-                      !_seenActive
-                          ? (_voice.status == 'Ready'
-                                ? 'Starting…'
-                                : _voice.status)
-                          : _voice.partial.isEmpty
-                          ? (_voice.byWake
-                                ? 'Go ahead, say your note.'
-                                : 'Speak now.')
-                          : cleanTranscript(_voice.partial)
-                                .replaceAll(RegExp(r'\.$'), '…'),
-                      textAlign: TextAlign.center,
-                      style: sans(
-                        20,
-                        height: 1.5,
-                        color: !_seenActive && _voice.statusError
-                            ? C.danger
+                const SizedBox(height: 20),
+                Flexible(
+                  flex: 4,
+                  child: ConstrainedBox(
+                    constraints: const BoxConstraints(maxHeight: 120),
+                    child: SingleChildScrollView(
+                      reverse: true,
+                      child: Text(
+                        !_seenActive
+                            ? (_voice.status == 'Ready'
+                                  ? 'Starting…'
+                                  : _voice.status)
                             : _voice.partial.isEmpty
-                            ? C.muted
-                            : C.text,
+                            ? (_voice.byWake
+                                  ? 'Go ahead, say your note.'
+                                  : 'Speak now.')
+                            : cleanTranscript(_voice.partial)
+                                  .replaceAll(RegExp(r'\.$'), '…'),
+                        textAlign: TextAlign.center,
+                        style: sans(
+                          20,
+                          height: 1.5,
+                          color: !_seenActive && _voice.statusError
+                              ? C.danger
+                              : _voice.partial.isEmpty
+                              ? C.muted
+                              : C.text,
+                        ),
                       ),
                     ),
                   ),
