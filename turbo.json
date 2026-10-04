@@ -21,6 +21,8 @@
     "build": {
       "dependsOn": [
         "fetch-models",
+        "lint",
+        "test",
         "^build"
       ],
       "inputs": [

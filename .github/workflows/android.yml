@@ -51,8 +51,31 @@ jobs:
 
       - run: pnpm install --frozen-lockfile
 
+      # Same key every build, so new APKs install as updates. Secrets aren't
+      # available to fork PRs; those builds use the debug key.
+      - name: Release signing key
+        env:
+          KEYSTORE_BASE64: ${{ secrets.ANDROID_KEYSTORE_BASE64 }}
+          STORE_PASSWORD: ${{ secrets.ANDROID_KEYSTORE_PASSWORD }}
+          KEY_ALIAS: ${{ secrets.ANDROID_KEY_ALIAS }}
+          KEY_PASSWORD: ${{ secrets.ANDROID_KEY_PASSWORD }}
+        run: |
+          if [ -z "$KEYSTORE_BASE64" ]; then
+            echo "No signing secrets; release build uses the debug key."
+            exit 0
+          fi
+          echo "$KEYSTORE_BASE64" | base64 -d > "$RUNNER_TEMP/release.jks"
+          printf 'storeFile=%s\nstorePassword=%s\nkeyAlias=%s\nkeyPassword=%s\n' \
+            "$RUNNER_TEMP/release.jks" "$STORE_PASSWORD" "$KEY_ALIAS" "$KEY_PASSWORD" \
+            > apps/mobile/android/key.properties
+
       - name: Lint, test and build
         run: pnpm turbo run lint test build
+
+      - name: Show APK signing certificate
+        run: |
+          APKSIGNER=$(ls "$ANDROID_HOME"/build-tools/*/apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs apps/mobile/build/app/outputs/flutter-apk/app-release.apk | grep -E "SHA-256|DN:"
 
       - uses: actions/upload-artifact@v7
         with:
