@@ -4,7 +4,9 @@ name: Android APK
 on:
   push:
     branches: [main]
+    paths-ignore: ["apps/api/**", ".github/workflows/api.yml"]
   pull_request:
+    paths-ignore: ["apps/api/**", ".github/workflows/api.yml"]
   workflow_dispatch:
 
 concurrency:
@@ -70,7 +72,7 @@ jobs:
             > apps/mobile/android/key.properties
 
       - name: Lint, test and build
-        run: pnpm turbo run lint test build
+        run: pnpm turbo run lint test build --filter=@my-notes/mobile
 
       - name: Show APK signing certificate
         run: |

@@ -8,7 +8,7 @@ A Turborepo monorepo:
 | Path | What |
 |---|---|
 | `apps/mobile` | Flutter Android app (see its README) |
-| `apps/api` | Backend API, later |
+| `apps/api` | Rust API: `POST /v1/transcribe` via Intron Sahara (see apps/api/README.md) |
 | `packages/` | Shared code, later |
 
 ## Setup

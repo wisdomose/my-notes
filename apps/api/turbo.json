@@ -1,0 +1,18 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "extends": ["//"],
+  "tasks": {
+    "build": {
+      "dependsOn": [],
+      "inputs": ["src/**", "Cargo.toml", "Cargo.lock"],
+      "outputs": ["target/release/hey-notes-api"]
+    },
+    "test": {
+      "dependsOn": [],
+      "inputs": ["src/**", "tests/**", "Cargo.toml", "Cargo.lock"]
+    },
+    "lint": {
+      "inputs": ["src/**", "tests/**", "Cargo.toml", "Cargo.lock"]
+    }
+  }
+}
