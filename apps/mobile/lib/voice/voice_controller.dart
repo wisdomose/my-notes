@@ -2,7 +2,7 @@ import 'dart:async';
 
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
-import 'package:permission_handler/permission_handler.dart';
+import 'package:record/record.dart';
 
 import '../data/settings.dart';
 import 'model_files.dart';
@@ -96,8 +96,10 @@ class VoiceController extends ChangeNotifier {
 
   /// Asks for the microphone (and notifications, for the service).
   Future<bool> ensurePermissions() async {
-    final mic = await Permission.microphone.request();
-    if (!mic.isGranted) return false;
+    final recorder = AudioRecorder();
+    final granted = await recorder.hasPermission();
+    await recorder.dispose();
+    if (!granted) return false;
     if (await FlutterForegroundTask.checkNotificationPermission() !=
         NotificationPermission.granted) {
       await FlutterForegroundTask.requestNotificationPermission();
