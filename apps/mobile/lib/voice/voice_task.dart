@@ -31,6 +31,9 @@ abstract final class Msg {
   static const nothing = 'nothing';
   static const error = 'error';
 
+  /// One diagnostics line: {'type': log, 'line': ..., 'status': ...?}.
+  static const log = 'log';
+
   /// Saved with FlutterForegroundTask.saveData so a capture requested before
   /// the service finished starting isn't lost.
   static const pendingStartKey = 'pendingStart';
@@ -57,24 +60,50 @@ class VoiceTaskHandler extends TaskHandler {
   double _level = 0;
   bool _userCancelled = false;
 
+  /// A start request that arrived while the models were still loading.
+  bool _pendingStart = false;
+  int _pcmChunks = 0;
+  bool _acceptFailed = false;
+
+  /// Sends a diagnostics line to the UI (Settings → Diagnostics). [status]
+  /// is a short user-facing state shown while waiting to capture.
+  void _log(String line, {String? status, bool error = false}) {
+    FlutterForegroundTask.sendDataToMain({
+      'type': Msg.log,
+      'line': line,
+      'status': ?status,
+      'error': error,
+    });
+  }
+
   @override
   Future<void> onStart(DateTime timestamp, TaskStarter starter) async {
+    var step = 'starting';
+    final sw = Stopwatch()..start();
     try {
-      so.initBindings();
-      _settings = await AppSettings.load();
-      _db = await NotesDb.open();
-      final paths = await ModelFiles.ensureBundled();
-      await _player.setAudioContext(
-        AudioContext(
-          android: const AudioContextAndroid(
-            audioFocus: AndroidAudioFocus.none,
-            usageType: AndroidUsageType.assistanceSonification,
-            contentType: AndroidContentType.sonification,
-          ),
-        ),
+      _log(
+        'service started (${starter.name})',
+        status: 'Starting voice engine…',
       );
+      step = 'loading speech library';
+      so.initBindings();
+      step = 'reading settings';
+      _settings = await AppSettings.load();
+      step = 'opening database';
+      _db = await NotesDb.open();
+      step = 'unpacking models';
+      final paths = await ModelFiles.ensureBundled();
+      _pendingStart |=
+          await FlutterForegroundTask.getData<bool>(key: Msg.pendingStartKey) ??
+          false;
+      await FlutterForegroundTask.removeData(key: Msg.pendingStartKey);
 
-      final engine = _engine = VoiceEngine(paths)
+      step = 'loading speech models';
+      _log(
+        'loading models (whisper: ${paths.whisperReady ? 'yes' : 'no'})',
+        status: 'Loading speech models…',
+      );
+      final engine = VoiceEngine(paths)
         ..wakeEnabled = _settings.wakeEnabled
         ..silenceSecs = _settings.silenceSecs;
       engine.init(sensitivity: _settings.sensitivity);
@@ -83,18 +112,45 @@ class VoiceTaskHandler extends TaskHandler {
         ..onPartial = _onPartial
         ..onLevel = _onLevel
         ..onDone = _onDone;
+      _engine = engine;
+      _log(
+        'models ready in ${sw.elapsedMilliseconds} ms '
+        '(whisper loaded: ${engine.whisperLoaded})',
+        status: 'Ready',
+      );
 
-      if (await FlutterForegroundTask.getData<bool>(key: Msg.pendingStartKey) ??
-          false) {
-        await FlutterForegroundTask.removeData(key: Msg.pendingStartKey);
+      // Beeps are nice to have; never let them stop the service.
+      try {
+        await _player.setAudioContext(
+          AudioContext(
+            android: const AudioContextAndroid(
+              audioFocus: AndroidAudioFocus.none,
+              usageType: AndroidUsageType.assistanceSonification,
+              contentType: AndroidContentType.sonification,
+            ),
+          ),
+        );
+      } catch (e) {
+        _log('beep setup failed (ignored): $e');
+      }
+
+      if (_pendingStart) {
+        _pendingStart = false;
+        _log('starting the capture requested while loading');
         engine.start();
       }
+      step = 'starting microphone';
       await _syncMic();
       _sendState();
-    } catch (e) {
+    } catch (e, st) {
+      _log(
+        'FAILED while $step: $e\n$st',
+        status: 'Voice engine failed',
+        error: true,
+      );
       FlutterForegroundTask.sendDataToMain({
         'type': Msg.error,
-        'message': 'Voice service failed to start: $e',
+        'message': 'Voice service failed while $step: $e',
       });
     }
   }
@@ -105,12 +161,24 @@ class VoiceTaskHandler extends TaskHandler {
   @override
   void onReceiveData(Object data) {
     if (data is! Map) return;
+    try {
+      _handle(data);
+    } catch (e, st) {
+      _log('command ${data['cmd']} failed: $e\n$st', error: true);
+    }
+  }
+
+  void _handle(Map<dynamic, dynamic> data) {
     final engine = _engine;
     switch (data['cmd']) {
       case Msg.start:
-        if (engine == null) return;
+        if (engine == null) {
+          _pendingStart = true;
+          _log('start requested while loading; will start when ready');
+          return;
+        }
         engine.start();
-        _syncMic();
+        _syncMic().catchError(_micFailed);
       case Msg.stop:
         engine?.finish();
       case Msg.cancel:
@@ -120,7 +188,21 @@ class VoiceTaskHandler extends TaskHandler {
         _reload();
       case Msg.ping:
         _sendState();
+        _log(
+          'ping: engine ${engine == null ? 'loading' : engine.state.name}, '
+          'mic ${_mic == null ? 'off' : 'on'}, chunks $_pcmChunks',
+          status: engine == null ? null : 'Ready',
+        );
     }
+  }
+
+  void _micFailed(Object e) {
+    _log('microphone failed: $e', status: 'Microphone failed', error: true);
+    FlutterForegroundTask.sendDataToMain({
+      'type': Msg.error,
+      'message': 'Could not use the microphone: $e',
+    });
+    _engine?.cancel();
   }
 
   Future<void> _reload() async {
@@ -132,7 +214,7 @@ class VoiceTaskHandler extends TaskHandler {
       ..silenceSecs = _settings.silenceSecs
       ..sensitivity = _settings.sensitivity
       ..loadWhisperIfReady();
-    await _syncMic();
+    await _syncMic().catchError(_micFailed);
     await _stopIfUnneeded();
     _updateNotification();
   }
@@ -156,11 +238,18 @@ class VoiceTaskHandler extends TaskHandler {
           ),
         ),
       );
-      _mic = stream.listen(_onPcm);
+      _pcmChunks = 0;
+      _mic = stream.listen(
+        _onPcm,
+        onError: (Object e) => _log('mic stream error: $e', error: true),
+        onDone: () => _log('mic stream ended'),
+      );
+      _log('microphone on');
     } else if (!need && _mic != null) {
       await _mic?.cancel();
       _mic = null;
       await _recorder.stop();
+      _log('microphone off');
     }
   }
 
@@ -175,6 +264,9 @@ class VoiceTaskHandler extends TaskHandler {
   }
 
   void _onPcm(Uint8List bytes) {
+    if (++_pcmChunks == 1) {
+      _log('first audio chunk: ${bytes.length} bytes');
+    }
     // 16-bit little-endian PCM; a chunk can end mid-sample.
     var data = bytes;
     if (_carry != null) {
@@ -190,7 +282,12 @@ class VoiceTaskHandler extends TaskHandler {
     for (var i = 0; i < n; i++) {
       samples[i] = view.getInt16(i * 2, Endian.little) / 32768.0;
     }
-    _engine?.accept(samples);
+    try {
+      _engine?.accept(samples);
+    } catch (e, st) {
+      if (!_acceptFailed) _log('audio processing failed: $e\n$st', error: true);
+      _acceptFailed = true;
+    }
   }
 
   void _onEngineState(EngineState s, {bool byWake = false}) {
@@ -223,7 +320,7 @@ class VoiceTaskHandler extends TaskHandler {
       }
       _userCancelled = false;
       _updateNotification();
-      await _syncMic();
+      await _syncMic().catchError(_micFailed);
       await _stopIfUnneeded();
       return;
     }
@@ -265,7 +362,7 @@ class VoiceTaskHandler extends TaskHandler {
         'message': 'Could not save note: $e',
       });
     }
-    await _syncMic();
+    await _syncMic().catchError(_micFailed);
     await _stopIfUnneeded();
   }
 

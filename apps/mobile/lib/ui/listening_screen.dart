@@ -38,8 +38,15 @@ class _ListeningScreenState extends State<ListeningScreen>
     );
     _onVoice();
     // If the service never starts capturing, don't strand the user here.
-    _startTimeout = Timer(const Duration(seconds: 8), () {
-      if (!_seenActive) _close();
+    // Loading Whisper can take a while on first start; after that, if the
+    // service still hasn't started capturing, say so instead of hanging.
+    _startTimeout = Timer(const Duration(seconds: 30), () {
+      if (_seenActive || !mounted) return;
+      showError(
+        context,
+        'The voice engine didn’t respond. See Settings → Diagnostics.',
+      );
+      _close();
     });
   }
 
@@ -100,7 +107,9 @@ class _ListeningScreenState extends State<ListeningScreen>
                         width: 8,
                         height: 8,
                         decoration: BoxDecoration(
-                          color: transcribing ? C.accent : C.rec,
+                          color: transcribing || !_seenActive
+                              ? C.accent
+                              : C.rec,
                           shape: BoxShape.circle,
                         ),
                       ),
@@ -108,6 +117,8 @@ class _ListeningScreenState extends State<ListeningScreen>
                       Text(
                         transcribing
                             ? 'SAVING'
+                            : !_seenActive
+                            ? 'STARTING'
                             : 'REC ${formatDuration(elapsed.inMilliseconds)}',
                         style: mono(12, color: C.textSoft),
                       ),
@@ -144,7 +155,11 @@ class _ListeningScreenState extends State<ListeningScreen>
                   child: SingleChildScrollView(
                     reverse: true,
                     child: Text(
-                      _voice.partial.isEmpty
+                      !_seenActive
+                          ? (_voice.status == 'Ready'
+                                ? 'Starting…'
+                                : _voice.status)
+                          : _voice.partial.isEmpty
                           ? (_voice.byWake
                                 ? 'Go ahead, say your note.'
                                 : 'Speak now.')
@@ -154,7 +169,11 @@ class _ListeningScreenState extends State<ListeningScreen>
                       style: sans(
                         20,
                         height: 1.5,
-                        color: _voice.partial.isEmpty ? C.muted : C.text,
+                        color: !_seenActive && _voice.statusError
+                            ? C.danger
+                            : _voice.partial.isEmpty
+                            ? C.muted
+                            : C.text,
                       ),
                     ),
                   ),

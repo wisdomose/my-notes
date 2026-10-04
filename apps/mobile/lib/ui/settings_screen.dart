@@ -5,6 +5,7 @@ import '../data/settings.dart';
 import '../main.dart';
 import '../theme.dart';
 import '../voice/whisper_download.dart';
+import 'diagnostics_screen.dart';
 import 'widgets.dart';
 
 class SettingsScreen extends StatefulWidget {
@@ -184,6 +185,36 @@ class _SettingsScreenState extends State<SettingsScreen> {
             const SectionLabel('TRANSCRIPTION'),
             const SizedBox(height: 10),
             _group([_whisperRow()]),
+            const SizedBox(height: 18),
+            const SectionLabel('HELP'),
+            const SizedBox(height: 10),
+            _group([
+              _row(
+                onTap: () => Navigator.of(context).push(
+                  MaterialPageRoute<void>(
+                    builder: (_) => const DiagnosticsScreen(),
+                  ),
+                ),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: Column(
+                        crossAxisAlignment: CrossAxisAlignment.start,
+                        children: [
+                          Text('Diagnostics', style: sans(15, weight: 500)),
+                          const SizedBox(height: 2),
+                          Text(
+                            'What the voice engine is doing, for bug reports',
+                            style: sans(13, color: C.muted),
+                          ),
+                        ],
+                      ),
+                    ),
+                    const Icon(Ic.chevron, color: C.muted),
+                  ],
+                ),
+              ),
+            ]),
             const SizedBox(height: 24),
             Text(
               'Everything runs on this phone. Your voice and notes never leave it.',

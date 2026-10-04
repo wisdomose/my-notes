@@ -26,15 +26,6 @@ android {
         versionName = flutter.versionName
     }
 
-    // 64-bit ARM only (practically every phone since ~2017). Without this,
-    // plugin native libs (onnxruntime, sherpa-onnx) ship for every ABI.
-    // (ndk.abiFilters is ignored under the Flutter Gradle plugin.)
-    packaging {
-        jniLibs {
-            excludes += listOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**")
-        }
-    }
-
     // Speech models are already compressed; don't waste build time on them.
     androidResources {
         noCompress += listOf("onnx")
@@ -57,4 +48,16 @@ kotlin {
 
 flutter {
     source = "../.."
+}
+
+// Release APKs are 64-bit ARM only (practically every phone since ~2017);
+// otherwise plugin native libs (onnxruntime, sherpa-onnx) ship for every ABI.
+// Debug builds keep all ABIs so the x86_64 emulator e2e test works.
+// (ndk.abiFilters is ignored under the Flutter Gradle plugin.)
+androidComponents {
+    onVariants(selector().withBuildType("release")) { variant ->
+        variant.packaging.jniLibs.excludes.addAll(
+            listOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**"),
+        )
+    }
 }
