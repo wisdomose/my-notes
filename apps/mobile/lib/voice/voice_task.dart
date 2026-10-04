@@ -71,6 +71,14 @@ class VoiceTaskHandler extends TaskHandler {
   int _pcmChunks = 0;
   bool _acceptFailed = false;
 
+  // Mic health, reported every 30 s (onRepeatEvent). Pure digital silence
+  // (peak exactly 0) means Android muted the mic for a background app; a
+  // real quiet room still has noise.
+  int _healthChunks = 0;
+  int _healthPeak = 0;
+  int _silentReports = 0;
+  bool _warnedMuted = false;
+
   /// Sends a diagnostics line to the UI (Settings → Diagnostics). [status]
   /// is a short user-facing state shown while waiting to capture.
   void _log(String line, {String? status, bool error = false}) {
@@ -162,7 +170,41 @@ class VoiceTaskHandler extends TaskHandler {
   }
 
   @override
-  void onRepeatEvent(DateTime timestamp) {}
+  void onRepeatEvent(DateTime timestamp) => _reportMicHealth();
+
+  Future<void> _reportMicHealth() async {
+    final chunks = _healthChunks;
+    final peak = _healthPeak / 32768;
+    _healthChunks = 0;
+    _healthPeak = 0;
+    if (_mic == null) return;
+    final open = await FlutterForegroundTask.isAppOnForeground;
+    _log(
+      'mic health (app ${open ? 'open' : 'in background'}): '
+      '$chunks chunks in 30 s, peak ${(peak * 100).toStringAsFixed(1)}%',
+    );
+    if (chunks == 0) {
+      _log('no audio for 30 s: the microphone stream stopped', error: true);
+      return;
+    }
+    if (peak > 0) {
+      _silentReports = 0;
+      return;
+    }
+    if (++_silentReports >= 2 && !_warnedMuted) {
+      _warnedMuted = true;
+      _log(
+        'the microphone is delivering pure silence (app '
+        '${open ? 'open' : 'in background'}): the phone is blocking it',
+        error: true,
+      );
+      FlutterForegroundTask.updateService(
+        notificationTitle: 'Hey Notes can’t hear you',
+        notificationText:
+            'The phone muted the microphone. Open the app to fix.',
+      );
+    }
+  }
 
   @override
   void onReceiveData(Object data) {
@@ -285,9 +327,14 @@ class VoiceTaskHandler extends TaskHandler {
     if (data.length.isOdd) _carry = data.last;
     final view = ByteData.sublistView(data);
     final samples = Float32List(n);
+    var peak = _healthPeak;
     for (var i = 0; i < n; i++) {
-      samples[i] = view.getInt16(i * 2, Endian.little) / 32768.0;
+      final v = view.getInt16(i * 2, Endian.little);
+      if (v.abs() > peak) peak = v.abs();
+      samples[i] = v / 32768.0;
     }
+    _healthPeak = peak;
+    _healthChunks++;
     try {
       _engine?.accept(samples);
     } catch (e, st) {
@@ -298,6 +345,7 @@ class VoiceTaskHandler extends TaskHandler {
 
   void _onEngineState(EngineState s, {bool byWake = false}) {
     if (s == EngineState.capturing) {
+      _log('capture started (${byWake ? '“Hey Notes”' : 'mic button'})');
       _partial = '';
       if (_settings.beep) _play('sounds/wake.wav');
     }
@@ -321,6 +369,9 @@ class VoiceTaskHandler extends TaskHandler {
 
   Future<void> _onDone(CaptureResult? result) async {
     if (result == null) {
+      _log(
+        _userCancelled ? 'capture cancelled' : 'capture ended: nothing heard',
+      );
       if (!_userCancelled) {
         FlutterForegroundTask.sendDataToMain({'type': Msg.nothing});
       }
@@ -354,6 +405,11 @@ class VoiceTaskHandler extends TaskHandler {
         audioPath: audioPath,
       );
       final id = await _db.insert(note);
+      _log(
+        'note saved: ${result.durationMs ~/ 1000} s, '
+        '${result.text.split(' ').length} words, '
+        '${result.usedWhisper ? 'Whisper' : 'streaming model'}',
+      );
       if (_settings.beep) _play('sounds/saved.wav');
       FlutterForegroundTask.sendDataToMain({
         'type': Msg.saved,

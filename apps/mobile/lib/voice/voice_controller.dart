@@ -3,6 +3,7 @@ import 'dart:async';
 import 'package:flutter/foundation.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:record/record.dart';
+import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/settings.dart';
 import 'model_files.dart';
@@ -64,7 +65,8 @@ class VoiceController extends ChangeNotifier {
       ),
       iosNotificationOptions: const IOSNotificationOptions(),
       foregroundTaskOptions: ForegroundTaskOptions(
-        eventAction: ForegroundTaskEventAction.nothing(),
+        // Mic health report every 30 s (VoiceTaskHandler.onRepeatEvent).
+        eventAction: ForegroundTaskEventAction.repeat(30000),
         allowWakeLock: true,
         allowAutoRestart: true,
       ),
@@ -161,23 +163,47 @@ class VoiceController extends ChangeNotifier {
     }
   }
 
-  /// Notifications only make the "Listening" notification visible; the
-  /// service works without them, so this never blocks anything.
+  /// Optional extras, asked after the service is up and never awaited:
+  /// notifications (only make "Listening" visible) and the battery
+  /// exemption (stops the phone pausing "Hey Notes" in the background;
+  /// the system dialog is shown once ever).
   void _askNotificationsOnce() {
     if (_askedNotifications) return;
     _askedNotifications = true;
     () async {
       try {
-        if (await FlutterForegroundTask.checkNotificationPermission() ==
+        if (await FlutterForegroundTask.checkNotificationPermission() !=
             NotificationPermission.granted) {
-          return;
+          _addLog('asking for notification permission');
+          final result =
+              await FlutterForegroundTask.requestNotificationPermission();
+          _addLog('notification permission: ${result.name}');
         }
-        _addLog('asking for notification permission');
-        final result =
-            await FlutterForegroundTask.requestNotificationPermission();
-        _addLog('notification permission: ${result.name}');
       } catch (e) {
         _addLog('notification permission check failed: $e');
+      }
+      try {
+        if (!settings.wakeEnabled) return;
+        if (await FlutterForegroundTask.isIgnoringBatteryOptimizations) {
+          _addLog('battery optimization: exempt');
+          return;
+        }
+        final prefs = SharedPreferencesAsync();
+        if (await prefs.getBool('askedBattery') ?? false) {
+          _addLog(
+            'battery optimization: NOT exempt '
+            '(Settings → Allow running in background)',
+          );
+          return;
+        }
+        await prefs.setBool('askedBattery', true);
+        _addLog('asking to run in the background (battery optimization)');
+        await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+        final exempt =
+            await FlutterForegroundTask.isIgnoringBatteryOptimizations;
+        _addLog('battery optimization: ${exempt ? 'exempt' : 'not exempt'}');
+      } catch (e) {
+        _addLog('battery optimization check failed: $e');
       }
     }();
   }
