@@ -52,6 +52,7 @@ class HeyOverlayPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                 )
                 result.success(null)
             }
+            "isShowing" -> result.success(ListeningOverlay.get(context).isShowing)
             "hide" -> {
                 ListeningOverlay.get(context).hide()
                 result.success(null)

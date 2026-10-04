@@ -11,6 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.provider.Settings
 import android.text.TextUtils
+import android.util.Log
 import android.util.TypedValue
 import android.view.Gravity
 import android.view.RoundedCorner
@@ -65,8 +66,14 @@ class ListeningOverlay private constructor(private val context: Context) {
     private var state: State? = null
     private var level = 0f
 
+    /** True while the window is attached and laid out on screen. */
+    val isShowing get() = root?.isAttachedToWindow == true
+
     fun show(state: State, text: String, level: Float) {
-        if (!Settings.canDrawOverlays(context)) return
+        if (!Settings.canDrawOverlays(context)) {
+            Log.w("HeyOverlay", "not allowed to draw over other apps")
+            return
+        }
         if (root == null && !attach()) return
         main.removeCallbacks(watchdog)
         main.postDelayed(watchdog, WATCHDOG_MS)
@@ -153,7 +160,8 @@ class ListeningOverlay private constructor(private val context: Context) {
             bubble.animate().translationY(0f).alpha(1f).setDuration(320)
                 .setInterpolator(DecelerateInterpolator()).start()
             true
-        } catch (_: Exception) {
+        } catch (e: Exception) {
+            Log.e("HeyOverlay", "could not add the overlay window", e)
             false
         }
     }

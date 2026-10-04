@@ -1,15 +1,22 @@
 # hey_overlay
 
-A new Flutter plugin project.
+Hey Notes' "listening over other apps" overlay (Android only): the screen
+edges glow and a status bubble sits near the bottom.
 
-## Getting Started
+```dart
+if (await HeyOverlay.canDraw()) {
+  await HeyOverlay.show(OverlayState.listening, text: partial, level: 0.4);
+  await HeyOverlay.show(OverlayState.transcribing);
+  await HeyOverlay.show(OverlayState.saved, text: note.title);
+  await HeyOverlay.hide();
+} else {
+  await HeyOverlay.openPermissionSettings(); // "Display over other apps"
+}
+```
 
-This project is a starting point for a Flutter
-[plug-in package](https://flutter.dev/to/develop-plugins),
-a specialized package that includes platform-specific implementation code for
-Android and/or iOS.
-
-For help getting started with Flutter development, view the
-[online documentation](https://docs.flutter.dev), which offers tutorials,
-samples, guidance on mobile development, and a full API reference.
-
+- One `TYPE_APPLICATION_OVERLAY` window, created from whichever engine calls
+  it (the app uses the background voice service). No service or Flutter
+  engine of its own, so Android 14/15 background-start limits don't apply.
+- Touches pass through (`FLAG_NOT_TOUCHABLE`, window alpha 0.8, which
+  Android 12+ requires for pass-through).
+- Removed automatically after 3 minutes without updates.

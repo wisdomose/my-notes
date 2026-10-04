@@ -44,6 +44,10 @@ class HeyOverlay {
     'level': level,
   });
 
+  /// Whether the overlay window is currently on screen.
+  static Future<bool> isShowing() async =>
+      await _channel.invokeMethod<bool>('isShowing') ?? false;
+
   /// Fades the overlay out and removes it.
   static Future<void> hide() => _channel.invokeMethod<void>('hide');
 }

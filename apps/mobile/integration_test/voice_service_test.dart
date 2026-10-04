@@ -79,9 +79,17 @@ void main() {
     expect(await HeyOverlay.canDraw(), isTrue);
     for (final state in OverlayState.values) {
       await HeyOverlay.show(state, text: 'Buy bread and eggs', level: 0.6);
-      await Future<void>.delayed(const Duration(milliseconds: 600));
+      // Long enough for the 2 fps screenshots in scripts/e2e.sh.
+      await Future<void>.delayed(const Duration(milliseconds: 2500));
+      expect(
+        await HeyOverlay.isShowing(),
+        isTrue,
+        reason: 'overlay window not on screen in state ${state.name}',
+      );
     }
     await HeyOverlay.hide();
+    await Future<void>.delayed(const Duration(milliseconds: 600));
+    expect(await HeyOverlay.isShowing(), isFalse);
     await Future<void>.delayed(const Duration(milliseconds: 400));
   });
 }
