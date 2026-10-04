@@ -4,6 +4,7 @@
 // the no-speech timeout. Run with scripts/e2e.sh, which pre-grants the mic.
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hey_notes/main.dart' as app;
+import 'package:hey_overlay/hey_overlay.dart';
 import 'package:hey_notes/voice/voice_engine.dart';
 import 'package:integration_test/integration_test.dart';
 
@@ -69,5 +70,18 @@ void main() {
 
     // ignore: avoid_print
     print('--- app log ---\n${voice.log.join('\n')}');
+  });
+
+  // scripts/e2e.sh grants "Display over other apps" with appops.
+  testWidgets('overlay shows every state over other apps and hides', (
+    tester,
+  ) async {
+    expect(await HeyOverlay.canDraw(), isTrue);
+    for (final state in OverlayState.values) {
+      await HeyOverlay.show(state, text: 'Buy bread and eggs', level: 0.6);
+      await Future<void>.delayed(const Duration(milliseconds: 600));
+    }
+    await HeyOverlay.hide();
+    await Future<void>.delayed(const Duration(milliseconds: 400));
   });
 }

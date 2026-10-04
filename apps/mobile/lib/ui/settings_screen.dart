@@ -1,5 +1,6 @@
 import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:hey_overlay/hey_overlay.dart';
 
 import '../data/settings.dart';
 import '../main.dart';
@@ -15,19 +16,40 @@ class SettingsScreen extends StatefulWidget {
   State<SettingsScreen> createState() => _SettingsScreenState();
 }
 
-class _SettingsScreenState extends State<SettingsScreen> {
+class _SettingsScreenState extends State<SettingsScreen>
+    with WidgetsBindingObserver {
   AppSettings get _s => services.settings;
   bool? _batteryOk;
+  bool? _canDrawOverlay;
 
   @override
   void initState() {
     super.initState();
-    _checkBattery();
+    WidgetsBinding.instance.addObserver(this);
+    _checkSystem();
+  }
+
+  @override
+  void dispose() {
+    WidgetsBinding.instance.removeObserver(this);
+    super.dispose();
+  }
+
+  /// Back from a system settings screen: re-check what was allowed.
+  @override
+  void didChangeAppLifecycleState(AppLifecycleState state) {
+    if (state == AppLifecycleState.resumed) _checkSystem();
   }
 
   Future<void> _checkBattery() async {
     final ok = await FlutterForegroundTask.isIgnoringBatteryOptimizations;
     if (mounted) setState(() => _batteryOk = ok);
+  }
+
+  Future<void> _checkSystem() async {
+    await _checkBattery();
+    final draw = await HeyOverlay.canDraw();
+    if (mounted) setState(() => _canDrawOverlay = draw);
   }
 
   Future<void> _changed() async {
@@ -68,6 +90,20 @@ class _SettingsScreenState extends State<SettingsScreen> {
                 (v) async {
                   await services.voice.setWakeEnabled(v);
                   setState(() {});
+                },
+              ),
+              _switchRow(
+                'Show over other apps',
+                _canDrawOverlay == false && _s.overlayEnabled
+                    ? 'Tap to allow “Display over other apps”'
+                    : 'Screen edges glow with a bubble when you say “Hey Notes”',
+                _s.overlayEnabled && _canDrawOverlay != false,
+                (v) async {
+                  _s.overlayEnabled = v;
+                  await _changed();
+                  if (v && _canDrawOverlay == false) {
+                    await HeyOverlay.openPermissionSettings();
+                  }
                 },
               ),
               _row(

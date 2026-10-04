@@ -116,7 +116,7 @@ class _ListeningScreenState extends State<ListeningScreen>
                       const SizedBox(width: 8),
                       Text(
                         transcribing
-                            ? 'SAVING'
+                            ? 'CONVERTING'
                             : !_seenActive
                             ? 'STARTING'
                             : 'REC ${formatDuration(elapsed.inMilliseconds)}',
@@ -136,7 +136,7 @@ class _ListeningScreenState extends State<ListeningScreen>
                 ),
                 const SizedBox(height: 32),
                 Text(
-                  transcribing ? 'Saving your note…' : 'I’m listening…',
+                  transcribing ? 'Converting to text…' : 'I’m listening…',
                   style: display(30),
                 ),
                 const SizedBox(height: 24),

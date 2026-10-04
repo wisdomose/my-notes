@@ -140,5 +140,7 @@ jobs:
         uses: actions/upload-artifact@v7
         with:
           name: e2e-logcat
-          path: apps/mobile/logcat.txt
+          path: |
+            apps/mobile/logcat.txt
+            apps/mobile/e2e-shots/
           retention-days: 7

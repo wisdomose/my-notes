@@ -1,6 +1,7 @@
 import 'dart:async';
 
 import 'package:flutter/material.dart';
+import 'package:hey_overlay/hey_overlay.dart';
 
 import '../data/note.dart';
 import '../main.dart';
@@ -32,6 +33,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   bool _searching = false;
   _Filter _filter = _Filter.all;
   bool _listeningOpen = false;
+
+  /// "Display over other apps" is allowed (null until checked).
+  bool? _canDrawOverlay;
   late final StreamSubscription<SavedEvent> _savedSub;
   late final StreamSubscription<void> _nothingSub;
 
@@ -45,6 +49,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       if (mounted) showError(context, 'Didn’t catch anything. Try again.');
     });
     _load();
+    _checkOverlay();
     WidgetsBinding.instance.addPostFrameCallback((_) {
       _voice.startListeningIfEnabled();
     });
@@ -64,9 +69,15 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   void didChangeAppLifecycleState(AppLifecycleState state) {
     if (state == AppLifecycleState.resumed) {
       _load();
+      _checkOverlay();
       _voice.refresh();
       _voice.startListeningIfEnabled();
     }
+  }
+
+  Future<void> _checkOverlay() async {
+    final ok = await HeyOverlay.canDraw();
+    if (mounted) setState(() => _canDrawOverlay = ok);
   }
 
   Future<void> _load() async {
@@ -150,6 +161,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
               slivers: [
                 SliverToBoxAdapter(child: _header()),
                 SliverToBoxAdapter(child: _statusCard()),
+                SliverToBoxAdapter(child: _overlayBanner()),
                 SliverToBoxAdapter(child: _whisperBanner()),
                 SliverToBoxAdapter(child: _chips()),
                 if (_loaded && visible.isEmpty)
@@ -286,6 +298,62 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
             ),
           ),
           Switch(value: on, onChanged: (v) => _voice.setWakeEnabled(v)),
+        ],
+      ),
+    );
+  }
+
+  /// Asks for "Display over other apps" so "Hey Notes" can show its bubble
+  /// and glowing edges while you're in another app.
+  Widget _overlayBanner() {
+    final settings = services.settings;
+    if (_canDrawOverlay != false ||
+        !settings.wakeEnabled ||
+        !settings.overlayEnabled) {
+      return const SizedBox.shrink();
+    }
+    return Container(
+      margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
+      padding: const EdgeInsets.fromLTRB(16, 14, 8, 10),
+      decoration: BoxDecoration(
+        color: C.card,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Text('See it listening in any app', style: sans(14, weight: 600)),
+          const SizedBox(height: 4),
+          Padding(
+            padding: const EdgeInsets.only(right: 8),
+            child: Text(
+              'Allow “Display over other apps” and the screen edges glow with '
+              'a bubble at the bottom when you say “Hey Notes”.',
+              style: sans(13, color: C.muted, height: 1.4),
+            ),
+          ),
+          Row(
+            mainAxisAlignment: MainAxisAlignment.end,
+            children: [
+              TextButton(
+                onPressed: () async {
+                  settings.overlayEnabled = false;
+                  await settings.save();
+                  setState(() {});
+                },
+                style: TextButton.styleFrom(minimumSize: const Size(44, 44)),
+                child: Text('Not now', style: sans(14, color: C.muted)),
+              ),
+              TextButton(
+                onPressed: HeyOverlay.openPermissionSettings,
+                style: TextButton.styleFrom(minimumSize: const Size(44, 44)),
+                child: Text(
+                  'Allow',
+                  style: sans(15, weight: 600, color: C.accent),
+                ),
+              ),
+            ],
+          ),
         ],
       ),
     );

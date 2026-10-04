@@ -30,7 +30,8 @@
         "assets/**",
         "android/**",
         "pubspec.yaml",
-        "pubspec.lock"
+        "pubspec.lock",
+        "$TURBO_ROOT$/packages/hey_overlay/**"
       ],
       "outputs": [
         "build/app/outputs/flutter-apk/**"
@@ -44,7 +45,8 @@
         "lib/**",
         "test/**",
         "pubspec.yaml",
-        "pubspec.lock"
+        "pubspec.lock",
+        "$TURBO_ROOT$/packages/hey_overlay/**"
       ]
     },
     "lint": {
@@ -52,7 +54,8 @@
         "lib/**",
         "test/**",
         "analysis_options.yaml",
-        "pubspec.yaml"
+        "pubspec.yaml",
+        "$TURBO_ROOT$/packages/hey_overlay/**"
       ]
     }
   }

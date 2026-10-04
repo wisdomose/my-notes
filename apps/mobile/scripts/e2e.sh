@@ -16,13 +16,29 @@ adb -s "$DEVICE" uninstall "$PKG" >/dev/null 2>&1 || true
 flutter build apk --debug
 adb -s "$DEVICE" install -g build/app/outputs/flutter-apk/app-debug.apk
 adb -s "$DEVICE" shell dumpsys package "$PKG" | grep -E "RECORD_AUDIO|POST_NOTIFICATIONS"
+# "Display over other apps" isn't a runtime permission; grant it via appops.
+adb -s "$DEVICE" shell appops set "$PKG" SYSTEM_ALERT_WINDOW allow
 
 adb -s "$DEVICE" logcat -c
 adb -s "$DEVICE" logcat -v time > logcat.txt &
 LOGCAT=$!
 
+# Screenshots every second while the tests run (e2e-shots/), so the
+# overlay and screens can be checked by eye.
+rm -rf e2e-shots && mkdir -p e2e-shots
+(
+  i=0
+  while true; do
+    adb -s "$DEVICE" exec-out screencap -p > "e2e-shots/$(printf %03d $i).png" 2>/dev/null
+    i=$((i + 1))
+    sleep 1
+  done
+) &
+SHOTS=$!
+
 flutter test integration_test -d "$DEVICE" --reporter expanded
 STATUS=$?
+kill $SHOTS 2>/dev/null
 
 kill $LOGCAT 2>/dev/null
 echo "--- logcat (filtered) ---"

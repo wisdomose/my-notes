@@ -9,6 +9,7 @@ class AppSettings {
     this.silenceSecs = 2.0,
     this.beep = true,
     this.keepAudio = false,
+    this.overlayEnabled = true,
   });
 
   bool wakeEnabled;
@@ -21,6 +22,9 @@ class AppSettings {
   bool beep;
   bool keepAudio;
 
+  /// Show the glowing-edge bubble over other apps after "Hey Notes".
+  bool overlayEnabled;
+
   static const silenceOptions = [1.5, 2.0, 3.0];
 
   static Future<AppSettings> load() async {
@@ -31,6 +35,7 @@ class AppSettings {
       silenceSecs: await p.getDouble('silenceSecs') ?? 2.0,
       beep: await p.getBool('beep') ?? true,
       keepAudio: await p.getBool('keepAudio') ?? false,
+      overlayEnabled: await p.getBool('overlayEnabled') ?? true,
     );
   }
 
@@ -41,6 +46,7 @@ class AppSettings {
     await p.setDouble('silenceSecs', silenceSecs);
     await p.setBool('beep', beep);
     await p.setBool('keepAudio', keepAudio);
+    await p.setBool('overlayEnabled', overlayEnabled);
   }
 
   String get sensitivityLabel => sensitivity < 34

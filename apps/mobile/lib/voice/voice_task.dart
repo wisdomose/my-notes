@@ -5,6 +5,7 @@ import 'dart:typed_data';
 import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
+import 'package:hey_overlay/hey_overlay.dart' as ho;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
@@ -66,6 +67,10 @@ class VoiceTaskHandler extends TaskHandler {
   double _level = 0;
   bool _userCancelled = false;
 
+  /// The over-other-apps bubble is showing for the current capture.
+  bool _overlayOn = false;
+  Timer? _overlayHide;
+
   /// A start request that arrived while the models were still loading.
   bool _pendingStart = false;
   int _pcmChunks = 0;
@@ -125,7 +130,8 @@ class VoiceTaskHandler extends TaskHandler {
         ..onState = _onEngineState
         ..onPartial = _onPartial
         ..onLevel = _onLevel
-        ..onDone = _onDone;
+        ..onDone = _onDone
+        ..beforeTranscribe = _beforeTranscribe;
       _engine = engine;
       _log(
         'models ready in ${sw.elapsedMilliseconds} ms '
@@ -348,6 +354,7 @@ class VoiceTaskHandler extends TaskHandler {
       _log('capture started (${byWake ? '“Hey Notes”' : 'mic button'})');
       _partial = '';
       if (_settings.beep) _play('sounds/wake.wav');
+      _maybeShowOverlay();
     }
     _sendState(byWake: byWake);
     _updateNotification();
@@ -355,11 +362,77 @@ class VoiceTaskHandler extends TaskHandler {
 
   void _onPartial(String text) => _partial = text;
 
+  /// Outside the app, "Hey Notes" lights up the screen edges and shows a
+  /// bubble (needs "Display over other apps"). Inside, the app's own
+  /// Listening screen does that job.
+  Future<void> _maybeShowOverlay() async {
+    _overlayHide?.cancel();
+    _overlayOn = false;
+    try {
+      if (!_settings.overlayEnabled) return;
+      if (await FlutterForegroundTask.isAppOnForeground) return;
+      if (!await ho.HeyOverlay.canDraw()) {
+        _log('overlay skipped: “Display over other apps” is not allowed');
+        return;
+      }
+      if (_engine?.state != EngineState.capturing) return;
+      _overlayOn = true;
+      await ho.HeyOverlay.show(ho.OverlayState.listening);
+    } catch (e) {
+      _log('overlay failed: $e', error: true);
+    }
+  }
+
+  String get _liveText =>
+      cleanTranscript(_partial).replaceAll(RegExp(r'\.$'), '…');
+
+  /// Shows a final overlay state, then removes the overlay shortly after.
+  void _finishOverlay(ho.OverlayState? state, {String text = ''}) {
+    if (!_overlayOn) return;
+    _overlayOn = false;
+    _overlayHide?.cancel();
+    if (state == null) {
+      ho.HeyOverlay.hide().catchError((_) {});
+      return;
+    }
+    ho.HeyOverlay.show(state, text: text).catchError((_) {});
+    _overlayHide = Timer(
+      const Duration(milliseconds: 1800),
+      () => ho.HeyOverlay.hide().catchError((_) {}),
+    );
+  }
+
+  /// Runs between "stopped listening" and the Whisper pass, which blocks
+  /// this isolate for a few seconds: get "turning your voice into text" onto
+  /// the notification and overlay first, so nothing looks stuck on
+  /// "listening" while we convert.
+  Future<void> _beforeTranscribe() async {
+    _log('converting speech to text');
+    try {
+      await Future.wait([
+        _updateNotification(),
+        if (_overlayOn)
+          ho.HeyOverlay.show(ho.OverlayState.transcribing, text: _liveText),
+      ]).timeout(const Duration(seconds: 1));
+    } catch (_) {
+      // A slow notification or overlay must never block saving the note.
+    }
+    // Let the app and the overlay draw a frame before we block.
+    await Future<void>.delayed(const Duration(milliseconds: 120));
+  }
+
   void _onLevel(double level) {
     _level = level;
     final now = DateTime.now();
     if (now.difference(_lastPartialSent).inMilliseconds < 90) return;
     _lastPartialSent = now;
+    if (_overlayOn) {
+      ho.HeyOverlay.show(
+        ho.OverlayState.listening,
+        text: _partial.isEmpty ? '' : _liveText,
+        level: level,
+      ).catchError((_) {});
+    }
     FlutterForegroundTask.sendDataToMain({
       'type': Msg.partial,
       'text': _partial,
@@ -375,6 +448,7 @@ class VoiceTaskHandler extends TaskHandler {
       if (!_userCancelled) {
         FlutterForegroundTask.sendDataToMain({'type': Msg.nothing});
       }
+      _finishOverlay(_userCancelled ? null : ho.OverlayState.nothing);
       _userCancelled = false;
       _updateNotification();
       await _syncMic().catchError(_micFailed);
@@ -418,7 +492,9 @@ class VoiceTaskHandler extends TaskHandler {
         'whisper': result.usedWhisper,
       });
       _updateNotification(savedTitle: note.title);
+      _finishOverlay(ho.OverlayState.saved, text: note.title);
     } catch (e) {
+      _finishOverlay(null);
       FlutterForegroundTask.sendDataToMain({
         'type': Msg.error,
         'message': 'Could not save note: $e',
@@ -443,16 +519,16 @@ class VoiceTaskHandler extends TaskHandler {
     });
   }
 
-  void _updateNotification({String? savedTitle}) {
+  Future<void> _updateNotification({String? savedTitle}) async {
     final engine = _engine;
     final text = switch (engine?.state) {
       EngineState.capturing => 'Listening… speak your note',
-      EngineState.transcribing => 'Saving your note…',
+      EngineState.transcribing => 'Converting your note to text…',
       _ when savedTitle != null => 'Saved: $savedTitle',
       _ when engine?.wakeEnabled ?? false => 'Listening for “Hey Notes”',
       _ => 'Ready',
     };
-    FlutterForegroundTask.updateService(
+    await FlutterForegroundTask.updateService(
       notificationTitle: 'Hey Notes',
       notificationText: text,
     );
@@ -460,6 +536,8 @@ class VoiceTaskHandler extends TaskHandler {
 
   @override
   Future<void> onDestroy(DateTime timestamp, bool isTimeout) async {
+    _overlayHide?.cancel();
+    if (_overlayOn) await ho.HeyOverlay.hide().catchError((_) {});
     await _mic?.cancel();
     _mic = null;
     await _recorder.dispose();

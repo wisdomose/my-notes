@@ -72,6 +72,12 @@ class VoiceEngine {
   /// Null result: nothing was said, or the capture was cancelled.
   void Function(CaptureResult? result)? onDone;
 
+  /// Awaited after the state switches to transcribing and before the
+  /// (blocking, seconds-long) Whisper pass, so the caller can get "turning
+  /// your voice into text" onto the screen first. Without it, [finish]
+  /// completes synchronously.
+  Future<void> Function()? beforeTranscribe;
+
   EngineState _state = EngineState.idle;
   EngineState get state => _state;
 
@@ -316,10 +322,13 @@ class VoiceEngine {
     return ((db + 50) / 40).clamp(0.0, 1.0);
   }
 
-  /// Ends the capture now and transcribes it. Calls [onDone] synchronously.
-  void finish() {
+  /// Ends the capture now and transcribes it, then calls [onDone]. Runs
+  /// synchronously unless [beforeTranscribe] is set.
+  Future<void> finish() async {
     if (_state != EngineState.capturing) return;
     _setState(EngineState.transcribing);
+    final hook = beforeTranscribe;
+    if (hook != null) await hook();
 
     _vad.flush();
     _drainSegments();
