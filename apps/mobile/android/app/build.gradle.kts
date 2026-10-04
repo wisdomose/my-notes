@@ -24,6 +24,12 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+
+        // 64-bit ARM only (practically every phone since ~2017). Without this,
+        // plugin native libs (onnxruntime etc.) ship for every ABI.
+        ndk {
+            abiFilters += listOf("arm64-v8a")
+        }
     }
 
     // Speech models are already compressed; don't waste build time on them.
