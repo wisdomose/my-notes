@@ -24,11 +24,14 @@ android {
         // flag during build.
         versionCode = flutter.versionCode
         versionName = flutter.versionName
+    }
 
-        // 64-bit ARM only (practically every phone since ~2017). Without this,
-        // plugin native libs (onnxruntime etc.) ship for every ABI.
-        ndk {
-            abiFilters += listOf("arm64-v8a")
+    // 64-bit ARM only (practically every phone since ~2017). Without this,
+    // plugin native libs (onnxruntime, sherpa-onnx) ship for every ABI.
+    // (ndk.abiFilters is ignored under the Flutter Gradle plugin.)
+    packaging {
+        jniLibs {
+            excludes += listOf("lib/armeabi-v7a/**", "lib/x86/**", "lib/x86_64/**")
         }
     }
 
