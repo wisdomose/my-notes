@@ -16,6 +16,7 @@ import '../data/settings.dart';
 import '../util/text.dart';
 import 'model_files.dart';
 import 'voice_engine.dart';
+import 'whisper.dart';
 
 /// Messages between the UI and the background voice service.
 abstract final class Msg {
@@ -59,6 +60,8 @@ class VoiceTaskHandler extends TaskHandler {
   late final _player = AudioPlayer();
   StreamSubscription<Uint8List>? _mic;
   VoiceEngine? _engine;
+  WhisperWorker? _whisper;
+  Future<void>? _whisperStarting;
   late NotesDb _db;
   late AppSettings _settings;
   int? _carry;
@@ -125,7 +128,8 @@ class VoiceTaskHandler extends TaskHandler {
       final engine = VoiceEngine(paths)
         ..wakeEnabled = _settings.wakeEnabled
         ..silenceSecs = _settings.silenceSecs;
-      engine.init(sensitivity: _settings.sensitivity);
+      // Whisper runs on its own isolate (see _startWhisper), not in here.
+      engine.init(sensitivity: _settings.sensitivity, loadWhisper: false);
       engine
         ..onState = _onEngineState
         ..onPartial = _onPartial
@@ -135,9 +139,10 @@ class VoiceTaskHandler extends TaskHandler {
       _engine = engine;
       _log(
         'models ready in ${sw.elapsedMilliseconds} ms '
-        '(whisper loaded: ${engine.whisperLoaded})',
+        '(whisper downloaded: ${paths.whisperReady})',
         status: 'Ready',
       );
+      _startWhisper();
 
       // Beeps are nice to have; never let them stop the service.
       try {
@@ -266,12 +271,39 @@ class VoiceTaskHandler extends TaskHandler {
     engine
       ..wakeEnabled = _settings.wakeEnabled
       ..silenceSecs = _settings.silenceSecs
-      ..sensitivity = _settings.sensitivity
-      ..loadWhisperIfReady();
+      ..sensitivity = _settings.sensitivity;
+    _startWhisper();
     await _syncMic().catchError(_micFailed);
     await _stopIfUnneeded();
     _updateNotification();
   }
+
+  /// Loads Whisper on its worker isolate, once it has been downloaded.
+  Future<void> _startWhisper() => _whisperStarting ??= () async {
+    final engine = _engine;
+    if (engine == null || _whisper != null) return;
+    if (!engine.paths.whisperReady) return;
+    final sw = Stopwatch()..start();
+    try {
+      final worker = _whisper = await WhisperWorker.spawn(engine.paths);
+      engine.transcriber = (segments) async {
+        final text = await worker.transcribe(segments, VoiceEngine.sampleRate);
+        final secs =
+            segments.fold(0, (n, s) => n + s.length) / VoiceEngine.sampleRate;
+        _log(
+          'Whisper: ${secs.toStringAsFixed(1)} s of speech in '
+          '${worker.lastDuration.inMilliseconds} ms '
+          '(${whisperThreads()} threads)',
+        );
+        return text;
+      };
+      _log('Whisper ready on its own thread in ${sw.elapsedMilliseconds} ms');
+    } catch (e) {
+      _log('Whisper failed to load: $e', error: true);
+    } finally {
+      _whisperStarting = null;
+    }
+  }();
 
   /// The mic is on while listening for the wake word or capturing a note.
   Future<void> _syncMic() async {
@@ -542,6 +574,8 @@ class VoiceTaskHandler extends TaskHandler {
     _mic = null;
     await _recorder.dispose();
     await _player.dispose();
+    _whisper?.dispose();
+    _whisper = null;
     _engine?.dispose();
     _engine = null;
   }

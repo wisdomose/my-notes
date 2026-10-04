@@ -6,6 +6,7 @@ import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
 
 import '../util/text.dart';
 import 'model_files.dart';
+import 'whisper.dart';
 
 enum EngineState { idle, capturing, transcribing }
 
@@ -78,6 +79,11 @@ class VoiceEngine {
   /// completes synchronously.
   Future<void> Function()? beforeTranscribe;
 
+  /// Runs Whisper elsewhere (the service uses a [WhisperWorker] isolate so
+  /// it stays responsive). Without it, a Whisper loaded with
+  /// [loadWhisperIfReady] runs in place.
+  Future<String> Function(List<Float32List> segments)? transcriber;
+
   EngineState _state = EngineState.idle;
   EngineState get state => _state;
 
@@ -99,7 +105,7 @@ class VoiceEngine {
   bool _byWake = false;
   String _partial = '';
 
-  bool get whisperLoaded => _whisper != null;
+  bool get whisperLoaded => _whisper != null || transcriber != null;
 
   void init({double sensitivity = 55, bool loadWhisper = true}) {
     _sensitivity = sensitivity;
@@ -183,21 +189,7 @@ class VoiceEngine {
 
   void loadWhisperIfReady() {
     if (_whisper != null || !paths.whisperReady) return;
-    _whisper = so.OfflineRecognizer(
-      so.OfflineRecognizerConfig(
-        model: so.OfflineModelConfig(
-          whisper: so.OfflineWhisperModelConfig(
-            encoder: paths.whisperEncoder,
-            decoder: paths.whisperDecoder,
-            language: 'en',
-            task: 'transcribe',
-          ),
-          tokens: paths.whisperTokens,
-          numThreads: 4,
-          debug: false,
-        ),
-      ),
-    );
+    _whisper = createWhisper(paths);
   }
 
   void accept(Float32List samples) {
@@ -336,18 +328,24 @@ class VoiceEngine {
 
     var text = '';
     var usedWhisper = false;
-    final whisper = _whisper;
-    if (whisper != null && _segments.isNotEmpty) {
-      final parts = <String>[];
-      for (final seg in _segments) {
-        final s = whisper.createStream();
-        s.acceptWaveform(samples: seg, sampleRate: sampleRate);
-        whisper.decode(s);
-        parts.add(whisper.getResult(s).text.trim());
-        s.free();
+    final segments = List.of(_segments);
+    if (segments.isNotEmpty) {
+      String? raw;
+      final remote = transcriber;
+      final local = _whisper;
+      try {
+        if (remote != null) {
+          raw = await remote(segments);
+        } else if (local != null) {
+          raw = whisperTranscribe(local, segments, sampleRate);
+        }
+      } catch (_) {
+        // Fall back to the streaming model's text below.
       }
-      text = cleanTranscript(parts.join(' '));
-      usedWhisper = text.isNotEmpty;
+      if (raw != null) {
+        text = cleanTranscript(raw);
+        usedWhisper = text.isNotEmpty;
+      }
     }
 
     final asr = _asrStream!;

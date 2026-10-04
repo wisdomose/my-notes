@@ -1,12 +1,14 @@
 // Runs the real voice pipeline on the host against synthesized speech.
 // Needs the models from scripts/fetch-models.sh. The Whisper case also needs
 // assets/models/whisper/ (the same files the app downloads), else it skips.
+import 'dart:async';
 import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hey_notes/voice/model_files.dart';
 import 'package:hey_notes/voice/voice_engine.dart';
+import 'package:hey_notes/voice/whisper.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
 
 const paths = ModelPaths('assets/models');
@@ -127,4 +129,46 @@ void main() {
       }
     }
   });
+
+  test('Whisper on its worker isolate keeps this thread free', () async {
+    final worker = await WhisperWorker.spawn(paths, libDir: hostLibDir());
+    addTearDown(worker.dispose);
+    final engine = VoiceEngine(paths)..init(loadWhisper: false);
+    addTearDown(engine.dispose);
+    engine.transcriber = (segs) =>
+        worker.transcribe(segs, VoiceEngine.sampleRate);
+
+    final done = Completer<CaptureResult?>();
+    engine.onDone = done.complete;
+    // Ticks only if this isolate isn't blocked while Whisper runs.
+    var ticks = 0;
+    var transcribing = false;
+    final timer = Timer.periodic(const Duration(milliseconds: 20), (_) {
+      if (transcribing) ticks++;
+    });
+    engine.onState = (s, {byWake = false}) {
+      transcribing = s == EngineState.transcribing;
+    };
+
+    final s = so.readWave('test/fixtures/hey_notes_shopping.wav').samples;
+    for (var i = 0; i < s.length; i += 1600) {
+      engine.accept(
+        Float32List.sublistView(s, i, (i + 1600).clamp(0, s.length)),
+      );
+      // Like the mic stream: audio arrives as events, not in one go.
+      await Future<void>.delayed(Duration.zero);
+    }
+    final result = await done.future.timeout(const Duration(seconds: 60));
+    timer.cancel();
+
+    // ignore: avoid_print
+    print(
+      'worker: ${result?.text} '
+      '(${worker.lastDuration.inMilliseconds} ms, $ticks ticks)',
+    );
+    expect(result?.usedWhisper, isTrue);
+    expect(result!.text, contains('bread'));
+    // Whisper takes far longer than 20 ms; we must have kept ticking.
+    expect(ticks, greaterThan(3));
+  }, skip: paths.whisperReady ? false : 'Whisper model not downloaded');
 }

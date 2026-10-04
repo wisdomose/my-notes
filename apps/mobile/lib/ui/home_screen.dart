@@ -36,6 +36,16 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   /// "Display over other apps" is allowed (null until checked).
   bool? _canDrawOverlay;
+
+  /// The app is on screen. "Hey Notes" said elsewhere must not open the
+  /// Listening screen behind the user's back (the overlay covers that).
+  bool _foreground =
+      WidgetsBinding.instance.lifecycleState != AppLifecycleState.paused &&
+      WidgetsBinding.instance.lifecycleState != AppLifecycleState.hidden;
+
+  /// A note saved while the app was in the background, shown on return.
+  SavedEvent? _savedWhileAway;
+  DateTime? _savedWhileAwayAt;
   late final StreamSubscription<SavedEvent> _savedSub;
   late final StreamSubscription<void> _nothingSub;
 
@@ -67,12 +77,30 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
 
   @override
   void didChangeAppLifecycleState(AppLifecycleState state) {
+    _foreground = state == AppLifecycleState.resumed;
     if (state == AppLifecycleState.resumed) {
       _load();
       _checkOverlay();
       _voice.refresh();
       _voice.startListeningIfEnabled();
+      // Still recording when they come back: show it.
+      if (_voice.state != EngineState.idle && !_listeningOpen) {
+        _openListening();
+      }
+      _showSavedWhileAway();
     }
+  }
+
+  /// "This is what you recorded": the sheet for a note saved while away,
+  /// on the Home screen, if it was saved in the last 10 minutes.
+  void _showSavedWhileAway() {
+    final e = _savedWhileAway;
+    final at = _savedWhileAwayAt;
+    _savedWhileAway = null;
+    _savedWhileAwayAt = null;
+    if (e == null || at == null) return;
+    if (DateTime.now().difference(at) > const Duration(minutes: 10)) return;
+    _onSaved(e);
   }
 
   Future<void> _checkOverlay() async {
@@ -96,7 +124,9 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       showError(context, err);
       _voice.clearError();
     }
-    if (_voice.state == EngineState.capturing && !_listeningOpen) {
+    if (_voice.state == EngineState.capturing &&
+        !_listeningOpen &&
+        _foreground) {
       _openListening();
     }
     if (mounted) setState(() {});
@@ -117,6 +147,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   }
 
   Future<void> _onSaved(SavedEvent e) async {
+    if (!_foreground) {
+      // Show it when they open the app, not now (its timer would run out).
+      _savedWhileAway = e;
+      _savedWhileAwayAt = DateTime.now();
+      _load();
+      return;
+    }
     await _load();
     final note = await services.db.get(e.noteId);
     if (note == null || !mounted) return;
