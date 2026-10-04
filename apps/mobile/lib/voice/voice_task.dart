@@ -3,6 +3,7 @@ import 'dart:io';
 import 'dart:typed_data';
 
 import 'package:audioplayers/audioplayers.dart';
+import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
@@ -42,14 +43,19 @@ abstract final class Msg {
 /// Entry point of the foreground service's isolate.
 @pragma('vm:entry-point')
 void startVoiceTask() {
+  // This isolate has its own Flutter binding; plugins (record, audioplayers)
+  // need it before their first platform-channel call.
+  WidgetsFlutterBinding.ensureInitialized();
   FlutterForegroundTask.setTaskHandler(VoiceTaskHandler());
 }
 
 /// Runs inside the Android foreground service: owns the microphone, runs the
 /// [VoiceEngine] and saves notes to the local database.
 class VoiceTaskHandler extends TaskHandler {
-  final _recorder = AudioRecorder();
-  final _player = AudioPlayer();
+  // Created on first use (in onStart), never at construction: the
+  // background isolate's binding must exist before plugins touch channels.
+  late final _recorder = AudioRecorder();
+  late final _player = AudioPlayer();
   StreamSubscription<Uint8List>? _mic;
   VoiceEngine? _engine;
   late NotesDb _db;
