@@ -1,0 +1,57 @@
+{
+  "$schema": "https://turbo.build/schema.json",
+  "globalPassThroughEnv": [
+    "JAVA_HOME",
+    "ANDROID_HOME",
+    "ANDROID_SDK_ROOT",
+    "ANDROID_NDK_HOME",
+    "FLUTTER_ROOT",
+    "PUB_CACHE",
+    "GRADLE_USER_HOME"
+  ],
+  "tasks": {
+    "fetch-models": {
+      "inputs": [
+        "scripts/fetch-models.sh"
+      ],
+      "outputs": [
+        "assets/models/**"
+      ]
+    },
+    "build": {
+      "dependsOn": [
+        "fetch-models",
+        "^build"
+      ],
+      "inputs": [
+        "lib/**",
+        "assets/**",
+        "android/**",
+        "pubspec.yaml",
+        "pubspec.lock"
+      ],
+      "outputs": [
+        "build/app/outputs/flutter-apk/**"
+      ]
+    },
+    "test": {
+      "dependsOn": [
+        "fetch-models"
+      ],
+      "inputs": [
+        "lib/**",
+        "test/**",
+        "pubspec.yaml",
+        "pubspec.lock"
+      ]
+    },
+    "lint": {
+      "inputs": [
+        "lib/**",
+        "test/**",
+        "analysis_options.yaml",
+        "pubspec.yaml"
+      ]
+    }
+  }
+}

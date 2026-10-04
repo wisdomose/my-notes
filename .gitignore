@@ -1,0 +1,7 @@
+node_modules/
+.turbo/
+.DS_Store
+*.log
+
+# Speech models are downloaded by apps/mobile/scripts/fetch-models.sh
+apps/mobile/assets/models/

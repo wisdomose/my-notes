@@ -1,0 +1,51 @@
+import 'package:shared_preferences/shared_preferences.dart';
+
+/// User settings. Uses the uncached async API so the UI and the background
+/// voice service always read the same values.
+class AppSettings {
+  AppSettings({
+    this.wakeEnabled = true,
+    this.sensitivity = 55,
+    this.silenceSecs = 2.0,
+    this.beep = true,
+    this.keepAudio = false,
+  });
+
+  bool wakeEnabled;
+
+  /// 0 (fewest false wakes) .. 100 (hears you from further).
+  double sensitivity;
+
+  /// Seconds of silence that end a note.
+  double silenceSecs;
+  bool beep;
+  bool keepAudio;
+
+  static const silenceOptions = [1.5, 2.0, 3.0];
+
+  static Future<AppSettings> load() async {
+    final p = SharedPreferencesAsync();
+    return AppSettings(
+      wakeEnabled: await p.getBool('wakeEnabled') ?? true,
+      sensitivity: await p.getDouble('sensitivity') ?? 55,
+      silenceSecs: await p.getDouble('silenceSecs') ?? 2.0,
+      beep: await p.getBool('beep') ?? true,
+      keepAudio: await p.getBool('keepAudio') ?? false,
+    );
+  }
+
+  Future<void> save() async {
+    final p = SharedPreferencesAsync();
+    await p.setBool('wakeEnabled', wakeEnabled);
+    await p.setDouble('sensitivity', sensitivity);
+    await p.setDouble('silenceSecs', silenceSecs);
+    await p.setBool('beep', beep);
+    await p.setBool('keepAudio', keepAudio);
+  }
+
+  String get sensitivityLabel => sensitivity < 34
+      ? 'Low'
+      : sensitivity < 67
+      ? 'Medium'
+      : 'High';
+}

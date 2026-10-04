@@ -1,0 +1,47 @@
+name: hey_notes
+description: "Hey Notes: say the wake word, speak, and your note is saved. Fully on-device."
+publish_to: 'none'
+version: 0.1.0+1
+
+environment:
+  sdk: ^3.13.5
+
+dependencies:
+  audioplayers: ^6.8.1
+  flutter:
+    sdk: flutter
+  flutter_foreground_task: ^11.0.3
+  http: ^1.6.0
+  path: ^1.9.1
+  path_provider: ^2.1.6
+  permission_handler: ^13.0.2
+  record: ^7.1.1
+  share_plus: ^13.3.1
+  shared_preferences: ^2.5.5
+  sherpa_onnx: ^1.13.8
+  sqflite: ^2.4.4
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^6.0.0
+
+flutter:
+  uses-material-design: true
+  assets:
+    - assets/models/
+    - assets/models/kws/
+    - assets/models/asr/
+    - assets/sounds/
+  fonts:
+    - family: Bricolage
+      fonts:
+        - asset: assets/fonts/BricolageGrotesque.ttf
+    - family: PlexSans
+      fonts:
+        - asset: assets/fonts/IBMPlexSans.ttf
+    - family: PlexMono
+      fonts:
+        - asset: assets/fonts/IBMPlexMono-Regular.ttf
+        - asset: assets/fonts/IBMPlexMono-Medium.ttf
+          weight: 500

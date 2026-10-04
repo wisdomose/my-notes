@@ -1,0 +1,14 @@
+{
+  "name": "my-notes",
+  "private": true,
+  "packageManager": "pnpm@12.6.0",
+  "scripts": {
+    "build": "turbo run build",
+    "test": "turbo run test",
+    "lint": "turbo run lint",
+    "fetch-models": "turbo run fetch-models"
+  },
+  "devDependencies": {
+    "turbo": "^2.11.7"
+  }
+}

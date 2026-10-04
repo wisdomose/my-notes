@@ -1,0 +1,10 @@
+{
+  "name": "@my-notes/mobile",
+  "private": true,
+  "scripts": {
+    "fetch-models": "bash scripts/fetch-models.sh",
+    "build": "flutter build apk --release --target-platform android-arm64",
+    "test": "flutter test",
+    "lint": "flutter analyze"
+  }
+}
