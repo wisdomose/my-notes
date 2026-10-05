@@ -52,5 +52,18 @@ cargo test             # fake Intron server, no credits used
 
 ## Deploy
 
-`Dockerfile` builds a small image (build context: `apps/api`). Set
-`INTRON_API_KEY` as a secret in the host (e.g. Coolify), expose port 8080.
+Live at **https://hey-notes-api.80.241.218.79.sslip.io** (Coolify project
+`hey-notes`, app `hey-notes-api`, a "Docker Image" resource). The VPS never
+builds anything:
+
+1. On push to `main`, `.github/workflows/api.yml` runs fmt, clippy and tests,
+   then pushes `ghcr.io/wisdomose/hey-notes-api:latest` (and `:<sha>`). The
+   image is public; it holds no secrets.
+2. The Coolify API only answers from the server's Tailscale address, so
+   GitHub can't trigger the deploy. Instead `deploy/coolify-watch.sh` runs
+   from cron on the server every 2 minutes, compares the image digest with
+   the last one deployed, and calls Coolify's deploy endpoint when it changed
+   (log: `~/.local/state/hey-notes/coolify-watch.log`).
+3. `INTRON_API_KEY`, `RATE_LIMIT_PER_MINUTE` and `TRUST_PROXY` are set as
+   environment variables on the Coolify app. The container is capped at
+   256 MB and health-checked on `/health`.
