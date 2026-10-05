@@ -9,6 +9,7 @@
 //! 200 → `{"text", "fileId", "durationSeconds", "language"}`;
 //! errors → `{"error": "..."}` with 400/413/422/429/502/504.
 
+pub mod cloudflare;
 pub mod intron;
 pub mod rate_limit;
 
@@ -131,20 +132,32 @@ fn error(status: StatusCode, message: &str) -> Response {
     (status, Json(json!({ "error": message }))).into_response()
 }
 
+/// The caller's IP for rate limiting. Behind Coolify's proxy the TCP peer
+/// is the proxy, so take the last `X-Forwarded-For` hop (the one our proxy
+/// appended). If that hop is Cloudflare, the real client is in
+/// `CF-Connecting-IP`; it's ignored otherwise, since anyone reaching the
+/// origin directly could set it.
 pub fn client_ip(headers: &HeaderMap, peer: SocketAddr, trust_proxy: bool) -> IpAddr {
-    if trust_proxy {
-        let forwarded = headers
-            .get_all("x-forwarded-for")
-            .iter()
-            .filter_map(|v| v.to_str().ok())
-            .flat_map(|v| v.split(','))
-            .filter_map(|s| s.trim().parse::<IpAddr>().ok())
-            .next_back();
-        if let Some(ip) = forwarded {
-            return ip;
-        }
+    if !trust_proxy {
+        return peer.ip();
     }
-    peer.ip()
+    let hop = headers
+        .get_all("x-forwarded-for")
+        .iter()
+        .filter_map(|v| v.to_str().ok())
+        .flat_map(|v| v.split(','))
+        .filter_map(|s| s.trim().parse::<IpAddr>().ok())
+        .next_back()
+        .unwrap_or(peer.ip());
+    if cloudflare::is_cloudflare(hop)
+        && let Some(ip) = headers
+            .get("cf-connecting-ip")
+            .and_then(|v| v.to_str().ok())
+            .and_then(|v| v.trim().parse::<IpAddr>().ok())
+    {
+        return ip;
+    }
+    hop
 }
 
 fn valid_language(l: &str) -> bool {
@@ -167,5 +180,45 @@ fn guess_mime(name: &str) -> &'static str {
         Some("webm") => "audio/webm",
         Some("flac") => "audio/flac",
         _ => "audio/wav",
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn headers(pairs: &[(&'static str, &str)]) -> HeaderMap {
+        let mut h = HeaderMap::new();
+        for (k, v) in pairs {
+            h.append(*k, v.parse().unwrap());
+        }
+        h
+    }
+
+    #[test]
+    fn client_ip_through_cloudflare_and_the_proxy() {
+        let proxy: SocketAddr = "10.0.1.5:443".parse().unwrap();
+        // Phone → Cloudflare → Traefik → us.
+        let via_cf = headers(&[
+            ("x-forwarded-for", "41.58.1.2, 172.67.140.75"),
+            ("cf-connecting-ip", "41.58.1.2"),
+        ]);
+        assert_eq!(
+            client_ip(&via_cf, proxy, true),
+            "41.58.1.2".parse::<IpAddr>().unwrap()
+        );
+
+        // Straight to the origin with a forged header: ignore the header.
+        let forged = headers(&[
+            ("x-forwarded-for", "203.0.113.9"),
+            ("cf-connecting-ip", "1.2.3.4"),
+        ]);
+        assert_eq!(
+            client_ip(&forged, proxy, true),
+            "203.0.113.9".parse::<IpAddr>().unwrap()
+        );
+
+        // Not behind a proxy: the TCP peer, whatever the headers say.
+        assert_eq!(client_ip(&via_cf, proxy, false), proxy.ip());
     }
 }

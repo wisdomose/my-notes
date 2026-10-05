@@ -7,7 +7,7 @@ import 'package:http/http.dart' as http;
 /// Override with `--dart-define=API_BASE_URL=...`.
 const apiBaseUrl = String.fromEnvironment(
   'API_BASE_URL',
-  defaultValue: 'https://hey-notes-api.80.241.218.79.sslip.io',
+  defaultValue: 'https://hey-notes-api.chat-buddy.xyz',
 );
 
 class CloudError implements Exception {

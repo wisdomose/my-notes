@@ -52,9 +52,12 @@ cargo test             # fake Intron server, no credits used
 
 ## Deploy
 
-Live at **https://hey-notes-api.80.241.218.79.sslip.io** (Coolify project
-`hey-notes`, app `hey-notes-api`, a "Docker Image" resource). The VPS never
-builds anything:
+Live at **https://hey-notes-api.chat-buddy.xyz** (Coolify project
+`hey-notes`, app `hey-notes-api`, a "Docker Image" resource), behind
+Cloudflare's proxy via the `*.chat-buddy.xyz` wildcard record, so the
+server's IP stays hidden. Rate limiting uses `CF-Connecting-IP`, trusted
+only when the request came from a Cloudflare edge IP. The VPS never builds
+anything:
 
 1. On push to `main`, `.github/workflows/api.yml` runs fmt, clippy and tests,
    then pushes `ghcr.io/wisdomose/hey-notes-api:latest` (and `:<sha>`). The
