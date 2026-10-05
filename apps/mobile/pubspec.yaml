@@ -1,7 +1,7 @@
 name: hey_notes
 description: "Hey Notes: say the wake word, speak, and your note is saved. Fully on-device."
 publish_to: 'none'
-version: 0.1.7+8
+version: 0.1.8+9
 
 environment:
   sdk: ^3.13.5

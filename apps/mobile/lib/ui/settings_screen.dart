@@ -220,7 +220,20 @@ class _SettingsScreenState extends State<SettingsScreen>
             const SizedBox(height: 18),
             const SectionLabel('TRANSCRIPTION'),
             const SizedBox(height: 10),
-            _group([_whisperRow()]),
+            _group([
+              _engineRow(
+                AppSettings.engineCloud,
+                'Cloud · Intron Sahara',
+                'Most accurate for Nigerian English. Needs internet; your '
+                    'recording is sent to Intron.',
+              ),
+              _engineRow(
+                AppSettings.engineDevice,
+                'On this phone · Whisper',
+                'Private and offline. Less accurate with accents.',
+              ),
+              _whisperRow(),
+            ]),
             const SizedBox(height: 18),
             const SectionLabel('HELP'),
             const SizedBox(height: 10),
@@ -253,7 +266,11 @@ class _SettingsScreenState extends State<SettingsScreen>
             ]),
             const SizedBox(height: 24),
             Text(
-              'Everything runs on this phone. Your voice and notes never leave it.',
+              _s.engine == AppSettings.engineCloud
+                  ? 'Notes are stored only on this phone. With Cloud, each '
+                        'recording is sent to Intron to be turned into text.'
+                  : 'Everything runs on this phone. Your voice and notes '
+                        'never leave it.',
               style: sans(13, color: C.muted, height: 1.45),
               textAlign: TextAlign.center,
             ),
@@ -359,6 +376,50 @@ class _SettingsScreenState extends State<SettingsScreen>
     );
   }
 
+  Widget _engineRow(String value, String title, String subtitle) {
+    final selected = _s.engine == value;
+    return Semantics(
+      selected: selected,
+      inMutuallyExclusiveGroup: true,
+      child: _row(
+        onTap: () {
+          _s.engine = value;
+          _changed();
+        },
+        child: Row(
+          children: [
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(title, style: sans(15, weight: 500)),
+                  const SizedBox(height: 2),
+                  Text(subtitle, style: sans(13, color: C.muted, height: 1.35)),
+                ],
+              ),
+            ),
+            const SizedBox(width: 12),
+            Container(
+              width: 24,
+              height: 24,
+              decoration: BoxDecoration(
+                shape: BoxShape.circle,
+                color: selected ? C.accent : Colors.transparent,
+                border: Border.all(
+                  color: selected ? C.accent : C.faint,
+                  width: 2,
+                ),
+              ),
+              child: selected
+                  ? const Icon(Ic.check, size: 16, color: C.bg)
+                  : null,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
   Widget _whisperRow() {
     final w = services.whisper;
     return ListenableBuilder(
@@ -366,8 +427,10 @@ class _SettingsScreenState extends State<SettingsScreen>
       builder: (context, _) {
         final (title, subtitle) = switch (w.status) {
           WhisperStatus.ready => (
-            'Accurate (Whisper)',
-            'On-device · works offline · tuned for accents',
+            'On-device model ready',
+            _s.engine == AppSettings.engineCloud
+                ? 'Whisper · used when you’re offline or the cloud fails'
+                : 'Whisper · works offline',
           ),
           WhisperStatus.downloading => (
             'Downloading Whisper… ${(w.progress * 100).round()}%',
@@ -375,8 +438,8 @@ class _SettingsScreenState extends State<SettingsScreen>
           ),
           WhisperStatus.failed => ('Download failed', w.error ?? 'Try again'),
           WhisperStatus.missing => (
-            'Fast (on-device)',
-            'Get Whisper for better accuracy · ${WhisperDownload.sizeLabel}',
+            'Get the on-device model',
+            'Whisper · ${WhisperDownload.sizeLabel} · for notes without internet',
           ),
         };
         return _row(

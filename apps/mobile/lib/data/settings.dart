@@ -10,6 +10,7 @@ class AppSettings {
     this.beep = true,
     this.keepAudio = false,
     this.overlayEnabled = true,
+    this.engine = engineCloud,
   });
 
   bool wakeEnabled;
@@ -25,6 +26,12 @@ class AppSettings {
   /// Show the glowing-edge bubble over other apps after "Hey Notes".
   bool overlayEnabled;
 
+  /// Who turns speech into text: [engineCloud] (Intron Sahara through the
+  /// Hey Notes API; falls back to on-device) or [engineDevice] (Whisper).
+  String engine;
+  static const engineCloud = 'cloud';
+  static const engineDevice = 'device';
+
   static const silenceOptions = [1.5, 2.0, 3.0];
 
   static Future<AppSettings> load() async {
@@ -36,6 +43,7 @@ class AppSettings {
       beep: await p.getBool('beep') ?? true,
       keepAudio: await p.getBool('keepAudio') ?? false,
       overlayEnabled: await p.getBool('overlayEnabled') ?? true,
+      engine: await p.getString('engine') ?? engineCloud,
     );
   }
 
@@ -47,6 +55,7 @@ class AppSettings {
     await p.setBool('beep', beep);
     await p.setBool('keepAudio', keepAudio);
     await p.setBool('overlayEnabled', overlayEnabled);
+    await p.setString('engine', engine);
   }
 
   String get sensitivityLabel => sensitivity < 34

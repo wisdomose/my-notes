@@ -14,6 +14,7 @@ import '../data/note.dart';
 import '../data/notes_db.dart';
 import '../data/settings.dart';
 import '../util/text.dart';
+import 'cloud.dart';
 import 'model_files.dart';
 import 'voice_engine.dart';
 import 'whisper.dart';
@@ -61,6 +62,10 @@ class VoiceTaskHandler extends TaskHandler {
   StreamSubscription<Uint8List>? _mic;
   VoiceEngine? _engine;
   WhisperWorker? _whisper;
+  final _cloud = CloudTranscriber();
+
+  /// Which engine produced the last transcript, for the log and the UI.
+  String _lastEngine = 'streaming';
   Future<void>? _whisperStarting;
   late NotesDb _db;
   late AppSettings _settings;
@@ -135,7 +140,8 @@ class VoiceTaskHandler extends TaskHandler {
         ..onPartial = _onPartial
         ..onLevel = _onLevel
         ..onDone = _onDone
-        ..beforeTranscribe = _beforeTranscribe;
+        ..beforeTranscribe = _beforeTranscribe
+        ..transcriber = _transcribe;
       _engine = engine;
       _log(
         'models ready in ${sw.elapsedMilliseconds} ms '
@@ -278,6 +284,46 @@ class VoiceTaskHandler extends TaskHandler {
     _updateNotification();
   }
 
+  /// Speech segments → text. Cloud (Intron Sahara via the Hey Notes API)
+  /// when chosen, falling back to on-device Whisper when offline, slow or
+  /// failing; Whisper when chosen. Throwing makes the engine use the
+  /// streaming model's text, so a note is never lost.
+  Future<String> _transcribe(List<Float32List> segments) async {
+    final secs =
+        (segments.fold(0, (n, s) => n + s.length) / VoiceEngine.sampleRate)
+            .toStringAsFixed(1);
+    if (_settings.engine == AppSettings.engineCloud) {
+      final sw = Stopwatch()..start();
+      try {
+        final text = await _cloud
+            .transcribe(segments, VoiceEngine.sampleRate)
+            .timeout(const Duration(seconds: 20));
+        _lastEngine = 'Sahara';
+        _log(
+          'Sahara (cloud): $secs s of speech in ${sw.elapsedMilliseconds} ms',
+        );
+        return text;
+      } catch (e) {
+        _log(
+          'cloud failed after ${sw.elapsedMilliseconds} ms ($e); using on-device',
+          error: true,
+        );
+      }
+    }
+    final worker = _whisper;
+    if (worker == null) {
+      _lastEngine = 'streaming';
+      throw StateError('Whisper is not downloaded');
+    }
+    final text = await worker.transcribe(segments, VoiceEngine.sampleRate);
+    _lastEngine = 'Whisper';
+    _log(
+      'Whisper: $secs s of speech in ${worker.lastDuration.inMilliseconds} ms '
+      '(${whisperThreads()} threads)',
+    );
+    return text;
+  }
+
   /// Loads Whisper on its worker isolate, once it has been downloaded.
   Future<void> _startWhisper() => _whisperStarting ??= () async {
     final engine = _engine;
@@ -285,18 +331,7 @@ class VoiceTaskHandler extends TaskHandler {
     if (!engine.paths.whisperReady) return;
     final sw = Stopwatch()..start();
     try {
-      final worker = _whisper = await WhisperWorker.spawn(engine.paths);
-      engine.transcriber = (segments) async {
-        final text = await worker.transcribe(segments, VoiceEngine.sampleRate);
-        final secs =
-            segments.fold(0, (n, s) => n + s.length) / VoiceEngine.sampleRate;
-        _log(
-          'Whisper: ${secs.toStringAsFixed(1)} s of speech in '
-          '${worker.lastDuration.inMilliseconds} ms '
-          '(${whisperThreads()} threads)',
-        );
-        return text;
-      };
+      _whisper = await WhisperWorker.spawn(engine.paths);
       _log('Whisper ready on its own thread in ${sw.elapsedMilliseconds} ms');
     } catch (e) {
       _log('Whisper failed to load: $e', error: true);
@@ -514,7 +549,7 @@ class VoiceTaskHandler extends TaskHandler {
       _log(
         'note saved: ${result.durationMs ~/ 1000} s, '
         '${result.text.split(' ').length} words, '
-        '${result.usedWhisper ? 'Whisper' : 'streaming model'}',
+        '${result.usedWhisper ? _lastEngine : 'streaming model'}',
       );
       if (_settings.beep) _play('sounds/saved.wav');
       FlutterForegroundTask.sendDataToMain({
@@ -522,6 +557,7 @@ class VoiceTaskHandler extends TaskHandler {
         'id': id,
         'byWake': result.byWake,
         'whisper': result.usedWhisper,
+        'engine': result.usedWhisper ? _lastEngine : 'streaming',
       });
       _updateNotification(savedTitle: note.title);
       _finishOverlay(ho.OverlayState.saved, text: note.title);
@@ -576,6 +612,7 @@ class VoiceTaskHandler extends TaskHandler {
     await _player.dispose();
     _whisper?.dispose();
     _whisper = null;
+    _cloud.close();
     _engine?.dispose();
     _engine = null;
   }
