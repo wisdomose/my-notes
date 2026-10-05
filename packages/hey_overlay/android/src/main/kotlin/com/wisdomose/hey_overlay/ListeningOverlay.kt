@@ -114,7 +114,10 @@ class ListeningOverlay private constructor(private val context: Context) {
         val bottom = navBarHeight() + context.dp(32f).toInt()
         frame.addView(
             bubble,
-            FrameLayout.LayoutParams(-2, -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
+            // Fixed width (screen minus margins, at most 360 dp): with
+            // wrap_content the bubble kept the previous state's width and
+            // cut longer titles off ("Didn't ca…").
+            FrameLayout.LayoutParams(bubbleWidth(), -2, Gravity.BOTTOM or Gravity.CENTER_HORIZONTAL).apply {
                 val side = context.dp(16f).toInt()
                 setMargins(side, 0, side, bottom)
             },
@@ -175,7 +178,6 @@ class ListeningOverlay private constructor(private val context: Context) {
             }
             val h = context.dp(14f).toInt()
             setPadding(h, context.dp(12f).toInt(), context.dp(20f).toInt(), context.dp(12f).toInt())
-            minimumWidth = context.dp(280f).toInt()
         }
         icon = StatusIconView(context)
         val size = context.dp(44f).toInt()
@@ -193,13 +195,12 @@ class ListeningOverlay private constructor(private val context: Context) {
             setTextColor(TEXT_SOFT)
             setTextSize(TypedValue.COMPLEX_UNIT_SP, 13f)
             maxLines = 2
-            maxWidth = context.dp(260f).toInt()
         }
         texts.addView(title)
         texts.addView(subtitle)
         box.addView(
             texts,
-            LinearLayout.LayoutParams(-2, -2).apply { marginStart = context.dp(14f).toInt() },
+            LinearLayout.LayoutParams(0, -2, 1f).apply { marginStart = context.dp(14f).toInt() },
         )
         return box
     }
@@ -256,6 +257,11 @@ class ListeningOverlay private constructor(private val context: Context) {
             }
             start()
         }
+    }
+
+    private fun bubbleWidth(): Int {
+        val screen = context.resources.displayMetrics.widthPixels
+        return minOf(screen - context.dp(32f).toInt(), context.dp(360f).toInt())
     }
 
     @SuppressLint("DiscouragedApi", "InternalInsetResource")
