@@ -289,6 +289,7 @@ class _SettingsScreenState extends State<SettingsScreen>
     String value,
     String title, {
     Widget? trailing,
+    String? detail,
     Future<bool> Function()? canSelect,
   }) {
     final selected = _s.engine == value;
@@ -307,6 +308,7 @@ class _SettingsScreenState extends State<SettingsScreen>
         child: Row(
           children: [
             Expanded(child: Text(title, style: _title)),
+            if (detail != null) Text(detail, style: mono(13)),
             trailing ?? _radio(selected),
           ],
         ),
@@ -393,6 +395,7 @@ class _SettingsScreenState extends State<SettingsScreen>
           engine,
           model.label,
           trailing: trailing,
+          detail: model.sizeLabel,
           canSelect: () => _supported(model),
         );
       },
