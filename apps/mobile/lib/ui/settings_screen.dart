@@ -83,20 +83,12 @@ class _SettingsScreenState extends State<SettingsScreen>
             const SectionLabel('WAKE WORD'),
             const SizedBox(height: 10),
             _group([
-              _switchRow(
-                'Listen in background',
-                'Keeps working with the screen off',
-                _s.wakeEnabled,
-                (v) async {
-                  await services.voice.setWakeEnabled(v);
-                  setState(() {});
-                },
-              ),
+              _switchRow('Listen in background', _s.wakeEnabled, (v) async {
+                await services.voice.setWakeEnabled(v);
+                setState(() {});
+              }),
               _switchRow(
                 'Show over other apps',
-                _canDrawOverlay == false && _s.overlayEnabled
-                    ? 'Tap to allow “Display over other apps”'
-                    : 'Screen edges glow with a bubble when you say “Hey Notes”',
                 _s.overlayEnabled && _canDrawOverlay != false,
                 (v) async {
                   _s.overlayEnabled = v;
@@ -106,29 +98,14 @@ class _SettingsScreenState extends State<SettingsScreen>
                   }
                 },
               ),
-              _row(
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Text('Wake phrase', style: sans(15, weight: 500)),
-                    ),
-                    Text('“Hey Notes”', style: sans(15, color: C.muted)),
-                  ],
-                ),
-              ),
+              _valueRow('Wake phrase', '“Hey Notes”'),
               _row(
                 child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
                     Row(
                       children: [
-                        Expanded(
-                          child: Text(
-                            'Sensitivity',
-                            style: sans(15, weight: 500),
-                          ),
-                        ),
-                        Text(_s.sensitivityLabel, style: mono(13)),
+                        Expanded(child: Text('Sensitivity', style: _title)),
+                        Text(_s.sensitivityLabel, style: _value),
                       ],
                     ),
                     Slider(
@@ -138,51 +115,14 @@ class _SettingsScreenState extends State<SettingsScreen>
                       onChanged: (v) => setState(() => _s.sensitivity = v),
                       onChangeEnd: (_) => _changed(),
                     ),
-                    Row(
-                      children: [
-                        Expanded(
-                          child: Text(
-                            'Fewer false wakes',
-                            style: sans(12, color: C.muted),
-                          ),
-                        ),
-                        Text(
-                          'Hears you from further',
-                          style: sans(12, color: C.muted),
-                        ),
-                      ],
-                    ),
                   ],
                 ),
               ),
               if (_batteryOk == false)
-                _row(
-                  onTap: () async {
-                    await FlutterForegroundTask.requestIgnoreBatteryOptimization();
-                    _checkBattery();
-                  },
-                  child: Row(
-                    children: [
-                      Expanded(
-                        child: Column(
-                          crossAxisAlignment: CrossAxisAlignment.start,
-                          children: [
-                            Text(
-                              'Allow running in background',
-                              style: sans(15, weight: 500),
-                            ),
-                            const SizedBox(height: 2),
-                            Text(
-                              'Stops Android from pausing “Hey Notes”',
-                              style: sans(13, color: C.muted),
-                            ),
-                          ],
-                        ),
-                      ),
-                      const Icon(Ic.chevron, color: C.muted),
-                    ],
-                  ),
-                ),
+                _linkRow('Allow running in background', () async {
+                  await FlutterForegroundTask.requestIgnoreBatteryOptimization();
+                  _checkBattery();
+                }),
             ]),
             const SizedBox(height: 18),
             const SectionLabel('RECORDING'),
@@ -192,93 +132,47 @@ class _SettingsScreenState extends State<SettingsScreen>
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text('Stop after silence', style: sans(15, weight: 500)),
+                    Text('Stop after silence', style: _title),
                     const SizedBox(height: 12),
                     _segmented(),
                   ],
                 ),
               ),
-              _switchRow(
-                'Beep when I wake up',
-                'A short tone after “Hey Notes”',
-                _s.beep,
-                (v) {
-                  _s.beep = v;
-                  _changed();
-                },
-              ),
-              _switchRow(
-                'Keep audio with note',
-                'So you can replay what you said',
-                _s.keepAudio,
-                (v) {
-                  _s.keepAudio = v;
-                  _changed();
-                },
-              ),
+              _switchRow('Beep on wake', _s.beep, (v) {
+                _s.beep = v;
+                _changed();
+              }),
+              _switchRow('Keep audio', _s.keepAudio, (v) {
+                _s.keepAudio = v;
+                _changed();
+              }),
             ]),
             const SizedBox(height: 18),
             const SectionLabel('TRANSCRIPTION'),
             const SizedBox(height: 10),
             _group([
-              _engineRow(
-                AppSettings.engineCloud,
-                'Cloud · Intron Sahara',
-                'Most accurate for Nigerian English. Needs internet; your '
-                    'recording is sent to Intron.',
-              ),
-              _engineRow(
-                AppSettings.engineDevice,
-                'On this phone · Whisper',
-                'Private and offline. Less accurate with accents.',
-              ),
+              _engineRow(AppSettings.engineCloud, 'Cloud'),
               _whisperRow(),
             ]),
             const SizedBox(height: 18),
-            const SectionLabel('HELP'),
-            const SizedBox(height: 10),
             _group([
-              _row(
-                onTap: () => Navigator.of(context).push(
+              _linkRow(
+                'Diagnostics',
+                () => Navigator.of(context).push(
                   MaterialPageRoute<void>(
                     builder: (_) => const DiagnosticsScreen(),
                   ),
                 ),
-                child: Row(
-                  children: [
-                    Expanded(
-                      child: Column(
-                        crossAxisAlignment: CrossAxisAlignment.start,
-                        children: [
-                          Text('Diagnostics', style: sans(15, weight: 500)),
-                          const SizedBox(height: 2),
-                          Text(
-                            'What the voice engine is doing, for bug reports',
-                            style: sans(13, color: C.muted),
-                          ),
-                        ],
-                      ),
-                    ),
-                    const Icon(Ic.chevron, color: C.muted),
-                  ],
-                ),
               ),
             ]),
-            const SizedBox(height: 24),
-            Text(
-              _s.engine == AppSettings.engineCloud
-                  ? 'Notes are stored only on this phone. With Cloud, each '
-                        'recording is sent to Intron to be turned into text.'
-                  : 'Everything runs on this phone. Your voice and notes '
-                        'never leave it.',
-              style: sans(13, color: C.muted, height: 1.45),
-              textAlign: TextAlign.center,
-            ),
           ],
         ),
       ),
     );
   }
+
+  TextStyle get _title => sans(15, weight: 500);
+  TextStyle get _value => sans(15, color: C.muted);
 
   Widget _group(List<Widget> rows) {
     return Container(
@@ -299,37 +193,48 @@ class _SettingsScreenState extends State<SettingsScreen>
   }
 
   Widget _row({required Widget child, VoidCallback? onTap}) {
-    final content = Padding(padding: const EdgeInsets.all(16), child: child);
+    final content = ConstrainedBox(
+      constraints: const BoxConstraints(minHeight: 56),
+      child: Padding(
+        padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 12),
+        child: child,
+      ),
+    );
     return onTap == null ? content : InkWell(onTap: onTap, child: content);
   }
 
-  Widget _switchRow(
-    String title,
-    String subtitle,
-    bool value,
-    ValueChanged<bool> onChanged,
-  ) {
+  Widget _switchRow(String title, bool value, ValueChanged<bool> onChanged) {
     return MergeSemantics(
       child: _row(
         onTap: () => onChanged(!value),
         child: Row(
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: sans(15, weight: 500)),
-                  const SizedBox(height: 2),
-                  Text(subtitle, style: sans(13, color: C.muted)),
-                ],
-              ),
-            ),
+            Expanded(child: Text(title, style: _title)),
             Switch(value: value, onChanged: onChanged),
           ],
         ),
       ),
     );
   }
+
+  Widget _valueRow(String title, String value) => _row(
+    child: Row(
+      children: [
+        Expanded(child: Text(title, style: _title)),
+        Text(value, style: _value),
+      ],
+    ),
+  );
+
+  Widget _linkRow(String title, VoidCallback onTap) => _row(
+    onTap: onTap,
+    child: Row(
+      children: [
+        Expanded(child: Text(title, style: _title)),
+        const Icon(Ic.chevron, color: C.muted),
+      ],
+    ),
+  );
 
   Widget _segmented() {
     return Container(
@@ -376,111 +281,84 @@ class _SettingsScreenState extends State<SettingsScreen>
     );
   }
 
-  Widget _engineRow(String value, String title, String subtitle) {
+  /// A selectable transcription option. [trailing] replaces the radio
+  /// (Whisper shows a download button until its model is on the phone).
+  Widget _engineRow(String value, String title, {Widget? trailing}) {
     final selected = _s.engine == value;
+    final selectable = trailing == null;
     return Semantics(
       selected: selected,
       inMutuallyExclusiveGroup: true,
       child: _row(
-        onTap: () {
-          _s.engine = value;
-          _changed();
-        },
+        onTap: selectable
+            ? () {
+                _s.engine = value;
+                _changed();
+              }
+            : null,
         child: Row(
           children: [
-            Expanded(
-              child: Column(
-                crossAxisAlignment: CrossAxisAlignment.start,
-                children: [
-                  Text(title, style: sans(15, weight: 500)),
-                  const SizedBox(height: 2),
-                  Text(subtitle, style: sans(13, color: C.muted, height: 1.35)),
-                ],
-              ),
-            ),
-            const SizedBox(width: 12),
-            Container(
-              width: 24,
-              height: 24,
-              decoration: BoxDecoration(
-                shape: BoxShape.circle,
-                color: selected ? C.accent : Colors.transparent,
-                border: Border.all(
-                  color: selected ? C.accent : C.faint,
-                  width: 2,
-                ),
-              ),
-              child: selected
-                  ? const Icon(Ic.check, size: 16, color: C.bg)
-                  : null,
-            ),
+            Expanded(child: Text(title, style: _title)),
+            trailing ?? _radio(selected),
           ],
         ),
       ),
     );
   }
 
+  Widget _radio(bool selected) => Container(
+    width: 24,
+    height: 24,
+    margin: const EdgeInsets.all(10),
+    decoration: BoxDecoration(
+      shape: BoxShape.circle,
+      color: selected ? C.accent : Colors.transparent,
+      border: Border.all(color: selected ? C.accent : C.faint, width: 2),
+    ),
+    child: selected ? const Icon(Ic.check, size: 16, color: C.bg) : null,
+  );
+
+  /// Whisper: a download button until the model is on the phone, a
+  /// progress ring while it downloads, then a radio like Cloud.
   Widget _whisperRow() {
     final w = services.whisper;
     return ListenableBuilder(
       listenable: w,
       builder: (context, _) {
-        final (title, subtitle) = switch (w.status) {
-          WhisperStatus.ready => (
-            'On-device model ready',
-            _s.engine == AppSettings.engineCloud
-                ? 'Whisper · used when you’re offline or the cloud fails'
-                : 'Whisper · works offline',
+        final trailing = switch (w.status) {
+          WhisperStatus.ready => null,
+          WhisperStatus.downloading => Padding(
+            padding: const EdgeInsets.all(12),
+            child: SizedBox(
+              width: 20,
+              height: 20,
+              child: CircularProgressIndicator(
+                value: w.progress > 0 ? w.progress : null,
+                strokeWidth: 2.5,
+                color: C.accent,
+                backgroundColor: C.faint,
+                semanticsLabel: 'Downloading Whisper',
+                semanticsValue: '${(w.progress * 100).round()}%',
+              ),
+            ),
           ),
-          WhisperStatus.downloading => (
-            'Downloading Whisper… ${(w.progress * 100).round()}%',
-            'Keep the app open until it finishes',
-          ),
-          WhisperStatus.failed => ('Download failed', w.error ?? 'Try again'),
-          WhisperStatus.missing => (
-            'Get the on-device model',
-            'Whisper · ${WhisperDownload.sizeLabel} · for notes without internet',
+          WhisperStatus.missing || WhisperStatus.failed => IconButton(
+            tooltip: w.status == WhisperStatus.failed
+                ? 'Retry download'
+                : 'Download Whisper (${WhisperDownload.sizeLabel})',
+            onPressed: w.start,
+            icon: Icon(
+              w.status == WhisperStatus.failed
+                  ? Icons.refresh_rounded
+                  : Ic.download,
+              color: C.accent,
+            ),
           ),
         };
-        return _row(
-          onTap:
-              w.status == WhisperStatus.missing ||
-                  w.status == WhisperStatus.failed
-              ? w.start
-              : null,
-          child: Column(
-            crossAxisAlignment: CrossAxisAlignment.start,
-            children: [
-              Row(
-                children: [
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
-                      children: [
-                        Text(title, style: sans(15, weight: 500)),
-                        const SizedBox(height: 2),
-                        Text(subtitle, style: sans(13, color: C.muted)),
-                      ],
-                    ),
-                  ),
-                  if (w.status == WhisperStatus.ready)
-                    const Icon(Ic.check, color: C.ok)
-                  else if (w.status != WhisperStatus.downloading)
-                    const Icon(Ic.download, color: C.accent),
-                ],
-              ),
-              if (w.status == WhisperStatus.downloading) ...[
-                const SizedBox(height: 12),
-                LinearProgressIndicator(
-                  value: w.progress,
-                  color: C.accent,
-                  backgroundColor: C.faint,
-                  minHeight: 4,
-                  borderRadius: BorderRadius.circular(2),
-                ),
-              ],
-            ],
-          ),
+        return _engineRow(
+          AppSettings.engineDevice,
+          'Whisper',
+          trailing: trailing,
         );
       },
     );

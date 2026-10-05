@@ -9,7 +9,6 @@ import '../theme.dart';
 import '../util/text.dart';
 import '../voice/voice_controller.dart';
 import '../voice/voice_engine.dart';
-import '../voice/whisper_download.dart';
 import 'listening_screen.dart';
 import 'note_screen.dart';
 import 'saved_sheet.dart';
@@ -199,7 +198,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
                 SliverToBoxAdapter(child: _header()),
                 SliverToBoxAdapter(child: _statusCard()),
                 SliverToBoxAdapter(child: _overlayBanner()),
-                SliverToBoxAdapter(child: _whisperBanner()),
                 SliverToBoxAdapter(child: _chips()),
                 if (_loaded && visible.isEmpty)
                   SliverFillRemaining(hasScrollBody: false, child: _empty())
@@ -359,16 +357,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.start,
         children: [
-          Text('See it listening in any app', style: sans(14, weight: 600)),
-          const SizedBox(height: 4),
-          Padding(
-            padding: const EdgeInsets.only(right: 8),
-            child: Text(
-              'Allow “Display over other apps” and the screen edges glow with '
-              'a bubble at the bottom when you say “Hey Notes”.',
-              style: sans(13, color: C.muted, height: 1.4),
-            ),
-          ),
+          Text('Show Hey Notes over other apps', style: sans(15, weight: 600)),
           Row(
             mainAxisAlignment: MainAxisAlignment.end,
             children: [
@@ -393,71 +382,6 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
           ),
         ],
       ),
-    );
-  }
-
-  Widget _whisperBanner() {
-    final whisper = services.whisper;
-    return ListenableBuilder(
-      listenable: whisper,
-      builder: (context, _) {
-        if (whisper.status == WhisperStatus.ready) {
-          return const SizedBox.shrink();
-        }
-        final downloading = whisper.status == WhisperStatus.downloading;
-        return Container(
-          margin: const EdgeInsets.fromLTRB(16, 0, 16, 16),
-          padding: const EdgeInsets.fromLTRB(16, 14, 8, 14),
-          decoration: BoxDecoration(
-            color: C.card,
-            borderRadius: BorderRadius.circular(16),
-          ),
-          child: Row(
-            children: [
-              Expanded(
-                child: Column(
-                  crossAxisAlignment: CrossAxisAlignment.start,
-                  children: [
-                    Text(
-                      downloading
-                          ? 'Downloading accurate model… ${(whisper.progress * 100).round()}%'
-                          : 'Better accuracy for your accent',
-                      style: sans(14, weight: 600),
-                    ),
-                    const SizedBox(height: 4),
-                    if (downloading)
-                      LinearProgressIndicator(
-                        value: whisper.progress,
-                        color: C.accent,
-                        backgroundColor: C.faint,
-                        minHeight: 4,
-                        borderRadius: BorderRadius.circular(2),
-                      )
-                    else
-                      Text(
-                        whisper.error ??
-                            'One-time ${WhisperDownload.sizeLabel} download. Runs offline after.',
-                        style: sans(13, color: C.muted),
-                      ),
-                  ],
-                ),
-              ),
-              if (!downloading)
-                TextButton(
-                  onPressed: whisper.start,
-                  style: TextButton.styleFrom(
-                    foregroundColor: C.accent,
-                    minimumSize: const Size(44, 44),
-                  ),
-                  child: Text(
-                    whisper.status == WhisperStatus.failed ? 'Retry' : 'Get',
-                    style: sans(15, weight: 600, color: C.accent),
-                  ),
-                ),
-            ],
-          ),
-        );
-      },
     );
   }
 

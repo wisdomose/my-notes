@@ -8,10 +8,10 @@ library;
 import 'package:flutter/services.dart';
 
 enum OverlayState {
-  /// "Listening… speak now", with live text and a level-driven pulse.
+  /// "Listening…", with live text and a level-driven pulse.
   listening,
 
-  /// "Converting to text…" with a spinner.
+  /// "Transcribing…" with a spinner.
   transcribing,
 
   /// "Saved", with the note title; the caller hides it shortly after.

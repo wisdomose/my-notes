@@ -591,7 +591,7 @@ class VoiceTaskHandler extends TaskHandler {
     final engine = _engine;
     final text = switch (engine?.state) {
       EngineState.capturing => 'Listening… speak your note',
-      EngineState.transcribing => 'Converting your note to text…',
+      EngineState.transcribing => 'Transcribing…',
       _ when savedTitle != null => 'Saved: $savedTitle',
       _ when engine?.wakeEnabled ?? false => 'Listening for “Hey Notes”',
       _ => 'Ready',

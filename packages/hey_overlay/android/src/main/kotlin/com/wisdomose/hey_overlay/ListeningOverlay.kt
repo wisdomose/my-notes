@@ -84,12 +84,10 @@ class ListeningOverlay private constructor(private val context: Context) {
             applyState(state)
         }
         icon.level = this.level
-        subtitle.text = when (state) {
-            State.LISTENING -> text.ifBlank { "Say your note. It saves when you stop." }
-            State.TRANSCRIBING -> text.ifBlank { "This takes a moment" }
-            State.SAVED -> text
-            State.NOTHING -> "Say “Hey Notes” to try again"
-        }
+        // Only real content under the title: your words, or the note title.
+        val sub = if (state == State.NOTHING) "" else text
+        subtitle.text = sub
+        subtitle.visibility = if (sub.isBlank()) View.GONE else View.VISIBLE
     }
 
     fun hide() {
@@ -211,7 +209,7 @@ class ListeningOverlay private constructor(private val context: Context) {
         pulse = null
         when (state) {
             State.LISTENING -> {
-                title.text = "Listening… speak now"
+                title.text = "Listening…"
                 // Live text: keep the newest words visible.
                 subtitle.ellipsize = TextUtils.TruncateAt.START
                 glow.color = AMBER
@@ -219,14 +217,14 @@ class ListeningOverlay private constructor(private val context: Context) {
                 startPulse(900)
             }
             State.TRANSCRIBING -> {
-                title.text = "Converting to text…"
+                title.text = "Transcribing…"
                 subtitle.ellipsize = TextUtils.TruncateAt.START
                 glow.color = AMBER
                 icon.mode = StatusIconView.Mode.SPINNER
                 startPulse(1800)
             }
             State.SAVED -> {
-                title.text = "Saved to Notes"
+                title.text = "Saved"
                 subtitle.ellipsize = TextUtils.TruncateAt.END
                 glow.color = GREEN
                 glow.intensity = 1f
