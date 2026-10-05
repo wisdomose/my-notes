@@ -17,7 +17,7 @@ import '../util/text.dart';
 import 'cloud.dart';
 import 'model_files.dart';
 import 'voice_engine.dart';
-import 'whisper.dart';
+import 'offline_asr.dart';
 
 /// Messages between the UI and the background voice service.
 abstract final class Msg {
@@ -61,12 +61,14 @@ class VoiceTaskHandler extends TaskHandler {
   late final _player = AudioPlayer();
   StreamSubscription<Uint8List>? _mic;
   VoiceEngine? _engine;
-  WhisperWorker? _whisper;
+
+  /// Loaded on-device models (see [_syncWorkers]).
+  final _workers = <OfflineModel, OfflineWorker>{};
+  final _workersStarting = <OfflineModel, Future<void>>{};
   final _cloud = CloudTranscriber();
 
   /// Which engine produced the last transcript, for the log and the UI.
   String _lastEngine = 'streaming';
-  Future<void>? _whisperStarting;
   late NotesDb _db;
   late AppSettings _settings;
   int? _carry;
@@ -131,13 +133,14 @@ class VoiceTaskHandler extends TaskHandler {
 
       step = 'loading speech models';
       _log(
-        'loading models (whisper: ${paths.whisperReady ? 'yes' : 'no'})',
+        'loading models (downloaded: '
+        '${OfflineModel.values.where(paths.isReady).map((m) => m.label).join(', ')})',
         status: 'Loading speech models…',
       );
       final engine = VoiceEngine(paths)
         ..wakeEnabled = _settings.wakeEnabled
         ..silenceSecs = _settings.silenceSecs;
-      // Whisper runs on its own isolate (see _startWhisper), not in here.
+      // On-device models run on their own isolates (_syncWorkers).
       engine.init(sensitivity: _settings.sensitivity, loadWhisper: false);
       engine
         ..onState = _onEngineState
@@ -149,10 +152,10 @@ class VoiceTaskHandler extends TaskHandler {
       _engine = engine;
       _log(
         'models ready in ${sw.elapsedMilliseconds} ms '
-        '(whisper downloaded: ${paths.whisperReady})',
+        '(engine: ${_settings.engine})',
         status: 'Ready',
       );
-      _startWhisper();
+      _syncWorkers();
 
       // Beeps are nice to have; never let them stop the service.
       try {
@@ -320,15 +323,16 @@ class VoiceTaskHandler extends TaskHandler {
       ..wakeEnabled = _settings.wakeEnabled
       ..silenceSecs = _settings.silenceSecs
       ..sensitivity = _settings.sensitivity;
-    _startWhisper();
+    _syncWorkers();
     await _syncMic().catchError(_micFailed);
     await _stopIfUnneeded();
     _updateNotification();
   }
 
   /// Speech segments → text. Cloud (Intron Sahara via the Hey Notes API)
-  /// when chosen, falling back to on-device Whisper when offline, slow or
-  /// failing; Whisper when chosen. Throwing makes the engine use the
+  /// when chosen, falling back to an on-device model when offline, slow or
+  /// failing; otherwise the chosen on-device model (Whisper or Parakeet),
+  /// then any other loaded one. Throwing makes the engine use the
   /// streaming model's text, so a note is never lost.
   Future<String> _transcribe(List<Float32List> segments) async {
     final secs =
@@ -352,39 +356,85 @@ class VoiceTaskHandler extends TaskHandler {
         );
       }
     }
-    final worker = _whisper;
-    if (worker == null) {
-      _lastEngine = 'streaming';
-      throw StateError('Whisper is not downloaded');
+    // On-device: the chosen model first, then whatever else is loaded.
+    final order = switch (_settings.engine) {
+      AppSettings.engineParakeet => [
+        OfflineModel.parakeet,
+        OfflineModel.whisper,
+      ],
+      _ => [OfflineModel.whisper, OfflineModel.parakeet],
+    };
+    for (final model in order) {
+      final worker = _workers[model];
+      if (worker == null) continue;
+      try {
+        // Never let a stuck worker leave the engine "transcribing" (deaf
+        // to the wake word) forever.
+        final text = await worker
+            .transcribe(segments, VoiceEngine.sampleRate)
+            .timeout(const Duration(seconds: 30));
+        _lastEngine = model.label;
+        _log(
+          '${model.label}: $secs s of speech in '
+          '${worker.lastDuration.inMilliseconds} ms '
+          '(${offlineThreads()} threads)',
+        );
+        return text;
+      } catch (e) {
+        _log('${model.label} failed: $e', error: true);
+      }
     }
-    // Never let a stuck worker leave the engine "transcribing" (deaf to
-    // the wake word) forever.
-    final text = await worker
-        .transcribe(segments, VoiceEngine.sampleRate)
-        .timeout(const Duration(seconds: 30));
-    _lastEngine = 'Whisper';
-    _log(
-      'Whisper: $secs s of speech in ${worker.lastDuration.inMilliseconds} ms '
-      '(${whisperThreads()} threads)',
-    );
-    return text;
+    _lastEngine = 'streaming';
+    throw StateError('no on-device model is available');
   }
 
-  /// Loads Whisper on its worker isolate, once it has been downloaded.
-  Future<void> _startWhisper() => _whisperStarting ??= () async {
+  /// Which on-device models to keep loaded: Whisper whenever it's
+  /// downloaded (small; the fallback for cloud), Parakeet only while it's
+  /// the chosen engine (it needs ~0.9 GB of memory).
+  Set<OfflineModel> get _wantedModels {
+    final paths = _engine?.paths;
+    if (paths == null) return {};
+    return {
+      if (paths.isReady(OfflineModel.whisper)) OfflineModel.whisper,
+      if (_settings.engine == AppSettings.engineParakeet &&
+          paths.isReady(OfflineModel.parakeet))
+        OfflineModel.parakeet,
+    };
+  }
+
+  /// Loads and unloads on-device models to match [_wantedModels].
+  void _syncWorkers() {
     final engine = _engine;
-    if (engine == null || _whisper != null) return;
-    if (!engine.paths.whisperReady) return;
-    final sw = Stopwatch()..start();
-    try {
-      _whisper = await WhisperWorker.spawn(engine.paths);
-      _log('Whisper ready on its own thread in ${sw.elapsedMilliseconds} ms');
-    } catch (e) {
-      _log('Whisper failed to load: $e', error: true);
-    } finally {
-      _whisperStarting = null;
+    if (engine == null) return;
+    final wanted = _wantedModels;
+    for (final m in _workers.keys.toList()) {
+      if (!wanted.contains(m)) {
+        _workers.remove(m)?.dispose();
+        _log('${m.label} unloaded');
+      }
     }
-  }();
+    for (final m in wanted) {
+      if (_workers.containsKey(m) || _workersStarting.containsKey(m)) continue;
+      final sw = Stopwatch()..start();
+      _workersStarting[m] = () async {
+        try {
+          final w = await OfflineWorker.spawn(m, engine.paths);
+          if (_wantedModels.contains(m)) {
+            _workers[m] = w;
+            _log(
+              '${m.label} ready on its own thread in ${sw.elapsedMilliseconds} ms',
+            );
+          } else {
+            w.dispose();
+          }
+        } catch (e) {
+          _log('${m.label} failed to load: $e', error: true);
+        } finally {
+          _workersStarting.remove(m);
+        }
+      }();
+    }
+  }
 
   /// The mic is on while listening for the wake word or capturing a note.
   Future<void> _syncMic() async {
@@ -662,8 +712,10 @@ class VoiceTaskHandler extends TaskHandler {
     _mic = null;
     await _recorder.dispose();
     await _player.dispose();
-    _whisper?.dispose();
-    _whisper = null;
+    for (final w in _workers.values) {
+      w.dispose();
+    }
+    _workers.clear();
     _cloud.close();
     _engine?.dispose();
     _engine = null;

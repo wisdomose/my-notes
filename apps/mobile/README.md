@@ -18,7 +18,9 @@ All speech runs on-device with [sherpa-onnx](https://github.com/k2-fsa/sherpa-on
 | Wake word | zipformer KWS (gigaspeech 3.3M), int8 | bundled |
 | Live text while you talk | streaming zipformer en 20M, int8 | bundled |
 | End of speech | Silero VAD | bundled |
-| Final text | Whisper base.en, int8 (~160 MB) | downloaded once in-app |
+| Final text (default) | Intron Sahara via `apps/api` | cloud; falls back on-device |
+| Final text, on-device | Whisper base.en int8 (~160 MB) | optional download |
+| Final text, on-device | NVIDIA Parakeet TDT 0.6B v2 int8 (~661 MB) | optional download; loaded only while selected (~0.9 GB RAM) |
 
 Whisper is far better with Nigerian English than the small streaming model,
 so when it's downloaded it re-transcribes each speech segment and that text

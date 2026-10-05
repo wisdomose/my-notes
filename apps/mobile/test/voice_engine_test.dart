@@ -8,7 +8,7 @@ import 'dart:typed_data';
 import 'package:flutter_test/flutter_test.dart';
 import 'package:hey_notes/voice/model_files.dart';
 import 'package:hey_notes/voice/voice_engine.dart';
-import 'package:hey_notes/voice/whisper.dart';
+import 'package:hey_notes/voice/offline_asr.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
 
 const paths = ModelPaths('assets/models');
@@ -154,7 +154,11 @@ void main() {
   });
 
   test('Whisper on its worker isolate keeps this thread free', () async {
-    final worker = await WhisperWorker.spawn(paths, libDir: hostLibDir());
+    final worker = await OfflineWorker.spawn(
+      OfflineModel.whisper,
+      paths,
+      libDir: hostLibDir(),
+    );
     addTearDown(worker.dispose);
     final engine = VoiceEngine(paths)..init(loadWhisper: false);
     addTearDown(engine.dispose);
@@ -194,4 +198,24 @@ void main() {
     // Whisper takes far longer than 20 ms; we must have kept ticking.
     expect(ticks, greaterThan(3));
   }, skip: paths.whisperReady ? false : 'Whisper model not downloaded');
+
+  test(
+    'Parakeet transcribes on its worker isolate',
+    () async {
+      final worker = await OfflineWorker.spawn(
+        OfflineModel.parakeet,
+        paths,
+        libDir: hostLibDir(),
+      );
+      addTearDown(worker.dispose);
+      final s = so.readWave('test/fixtures/hey_notes_shopping.wav').samples;
+      final text = await worker.transcribe([s], VoiceEngine.sampleRate);
+      // ignore: avoid_print
+      print('parakeet: $text (${worker.lastDuration.inMilliseconds} ms)');
+      expect(text.toLowerCase(), contains('buy bread'));
+    },
+    skip: paths.isReady(OfflineModel.parakeet)
+        ? false
+        : 'Parakeet model not downloaded',
+  );
 }

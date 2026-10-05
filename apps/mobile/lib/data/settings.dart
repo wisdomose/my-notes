@@ -27,10 +27,12 @@ class AppSettings {
   bool overlayEnabled;
 
   /// Who turns speech into text: [engineCloud] (Intron Sahara through the
-  /// Hey Notes API; falls back to on-device) or [engineDevice] (Whisper).
+  /// Hey Notes API; falls back to on-device), [engineDevice] (Whisper) or
+  /// [engineParakeet].
   String engine;
   static const engineCloud = 'cloud';
   static const engineDevice = 'device';
+  static const engineParakeet = 'parakeet';
 
   static const silenceOptions = [1.5, 2.0, 3.0];
 

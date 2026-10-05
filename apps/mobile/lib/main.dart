@@ -8,16 +8,18 @@ import 'theme.dart';
 import 'ui/home_screen.dart';
 import 'voice/model_files.dart';
 import 'voice/voice_controller.dart';
-import 'voice/whisper_download.dart';
+import 'voice/model_download.dart';
 
 /// App-wide services, created once at startup.
 class Services {
-  Services._(this.db, this.settings, this.voice, this.whisper);
+  Services._(this.db, this.settings, this.voice, this.downloads);
 
   final NotesDb db;
   final AppSettings settings;
   final VoiceController voice;
-  final WhisperDownload whisper;
+
+  /// One per optional on-device model.
+  final Map<OfflineModel, ModelDownload> downloads;
 
   static late final Services instance;
 
@@ -26,8 +28,11 @@ class Services {
     final settings = await AppSettings.load();
     final paths = await ModelFiles.ensureBundled();
     final voice = VoiceController(settings)..init();
-    final whisper = WhisperDownload(paths, onReady: voice.settingsChanged);
-    instance = Services._(db, settings, voice, whisper);
+    final downloads = {
+      for (final m in OfflineModel.values)
+        m: ModelDownload(paths, m, onReady: voice.settingsChanged),
+    };
+    instance = Services._(db, settings, voice, downloads);
   }
 }
 

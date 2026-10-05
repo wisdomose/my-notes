@@ -5,7 +5,8 @@ import 'package:hey_overlay/hey_overlay.dart';
 import '../data/settings.dart';
 import '../main.dart';
 import '../theme.dart';
-import '../voice/whisper_download.dart';
+import '../voice/model_download.dart';
+import '../voice/model_files.dart';
 import 'diagnostics_screen.dart';
 import 'widgets.dart';
 
@@ -152,7 +153,8 @@ class _SettingsScreenState extends State<SettingsScreen>
             const SizedBox(height: 10),
             _group([
               _engineRow(AppSettings.engineCloud, 'Cloud'),
-              _whisperRow(),
+              _modelRow(OfflineModel.whisper, AppSettings.engineDevice),
+              _modelRow(OfflineModel.parakeet, AppSettings.engineParakeet),
             ]),
             const SizedBox(height: 18),
             _group([
@@ -318,48 +320,44 @@ class _SettingsScreenState extends State<SettingsScreen>
     child: selected ? const Icon(Ic.check, size: 16, color: C.bg) : null,
   );
 
-  /// Whisper: a download button until the model is on the phone, a
+  /// An on-device model: a download button until it's on the phone, a
   /// progress ring while it downloads, then a radio like Cloud.
-  Widget _whisperRow() {
-    final w = services.whisper;
+  Widget _modelRow(OfflineModel model, String engine) {
+    final d = services.downloads[model]!;
     return ListenableBuilder(
-      listenable: w,
+      listenable: d,
       builder: (context, _) {
-        final trailing = switch (w.status) {
-          WhisperStatus.ready => null,
-          WhisperStatus.downloading => Padding(
+        final trailing = switch (d.status) {
+          ModelStatus.ready => null,
+          ModelStatus.downloading => Padding(
             padding: const EdgeInsets.all(12),
             child: SizedBox(
               width: 20,
               height: 20,
               child: CircularProgressIndicator(
-                value: w.progress > 0 ? w.progress : null,
+                value: d.progress > 0 ? d.progress : null,
                 strokeWidth: 2.5,
                 color: C.accent,
                 backgroundColor: C.faint,
-                semanticsLabel: 'Downloading Whisper',
-                semanticsValue: '${(w.progress * 100).round()}%',
+                semanticsLabel: 'Downloading ${model.label}',
+                semanticsValue: '${(d.progress * 100).round()}%',
               ),
             ),
           ),
-          WhisperStatus.missing || WhisperStatus.failed => IconButton(
-            tooltip: w.status == WhisperStatus.failed
+          ModelStatus.missing || ModelStatus.failed => IconButton(
+            tooltip: d.status == ModelStatus.failed
                 ? 'Retry download'
-                : 'Download Whisper (${WhisperDownload.sizeLabel})',
-            onPressed: w.start,
+                : 'Download ${model.label} (${model.sizeLabel})',
+            onPressed: d.start,
             icon: Icon(
-              w.status == WhisperStatus.failed
+              d.status == ModelStatus.failed
                   ? Icons.refresh_rounded
                   : Ic.download,
               color: C.accent,
             ),
           ),
         };
-        return _engineRow(
-          AppSettings.engineDevice,
-          'Whisper',
-          trailing: trailing,
-        );
+        return _engineRow(engine, model.label, trailing: trailing);
       },
     );
   }

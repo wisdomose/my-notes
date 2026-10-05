@@ -6,7 +6,7 @@ import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
 
 import '../util/text.dart';
 import 'model_files.dart';
-import 'whisper.dart';
+import 'offline_asr.dart';
 
 enum EngineState { idle, capturing, transcribing }
 
@@ -79,7 +79,7 @@ class VoiceEngine {
   /// completes synchronously.
   Future<void> Function()? beforeTranscribe;
 
-  /// Runs Whisper elsewhere (the service uses a [WhisperWorker] isolate so
+  /// Runs Whisper elsewhere (the service uses a [OfflineWorker] isolate so
   /// it stays responsive). Without it, a Whisper loaded with
   /// [loadWhisperIfReady] runs in place.
   Future<String> Function(List<Float32List> segments)? transcriber;
@@ -189,7 +189,7 @@ class VoiceEngine {
 
   void loadWhisperIfReady() {
     if (_whisper != null || !paths.whisperReady) return;
-    _whisper = createWhisper(paths);
+    _whisper = createOfflineRecognizer(OfflineModel.whisper, paths);
   }
 
   void accept(Float32List samples) {
@@ -337,7 +337,7 @@ class VoiceEngine {
         if (remote != null) {
           raw = await remote(segments);
         } else if (local != null) {
-          raw = whisperTranscribe(local, segments, sampleRate);
+          raw = offlineTranscribe(local, segments, sampleRate);
         }
       } catch (_) {
         // Fall back to the streaming model's text below.
