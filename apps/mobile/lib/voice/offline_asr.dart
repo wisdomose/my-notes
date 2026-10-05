@@ -17,26 +17,27 @@ so.OfflineRecognizer createOfflineRecognizer(
   int? threads,
 }) {
   final n = threads ?? offlineThreads();
-  final config = switch (model) {
-    OfflineModel.whisper => so.OfflineModelConfig(
+  String f(String name) => paths.fileOf(model, name);
+  final config = switch (model.kind) {
+    ModelKind.whisper => so.OfflineModelConfig(
       whisper: so.OfflineWhisperModelConfig(
-        encoder: paths.whisperEncoder,
-        decoder: paths.whisperDecoder,
+        encoder: f(model.encoder),
+        decoder: f(model.decoder),
         language: 'en',
         task: 'transcribe',
       ),
-      tokens: paths.whisperTokens,
+      tokens: f(model.tokens),
       numThreads: n,
       debug: false,
     ),
-    OfflineModel.parakeet => so.OfflineModelConfig(
+    ModelKind.nemoTransducer => so.OfflineModelConfig(
       transducer: so.OfflineTransducerModelConfig(
-        encoder: paths.parakeetEncoder,
-        decoder: paths.parakeetDecoder,
-        joiner: paths.parakeetJoiner,
+        encoder: f(model.encoder),
+        decoder: f(model.decoder),
+        joiner: f(model.joiner!),
       ),
       modelType: 'nemo_transducer',
-      tokens: paths.parakeetTokens,
+      tokens: f(model.tokens),
       numThreads: n,
       debug: false,
     ),

@@ -43,6 +43,7 @@ class HeyOverlayPlugin : FlutterPlugin, MethodChannel.MethodCallHandler {
                     "transcribing" -> ListeningOverlay.State.TRANSCRIBING
                     "saved" -> ListeningOverlay.State.SAVED
                     "nothing" -> ListeningOverlay.State.NOTHING
+                    "failed" -> ListeningOverlay.State.FAILED
                     else -> ListeningOverlay.State.LISTENING
                 }
                 ListeningOverlay.get(context).show(

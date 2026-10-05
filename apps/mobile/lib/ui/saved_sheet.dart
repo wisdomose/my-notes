@@ -42,6 +42,8 @@ class _SavedSheetState extends State<_SavedSheet> {
   @override
   void initState() {
     super.initState();
+    // A failure stays up until dismissed.
+    if (widget.note.failed) return;
     _autoClose = Timer(const Duration(seconds: 6), () {
       if (mounted) Navigator.of(context).maybePop();
     });
@@ -56,6 +58,7 @@ class _SavedSheetState extends State<_SavedSheet> {
   @override
   Widget build(BuildContext context) {
     final note = widget.note;
+    final failed = note.failed;
     final listening = services.settings.wakeEnabled;
     return Listener(
       // Any touch keeps the sheet open.
@@ -83,17 +86,24 @@ class _SavedSheetState extends State<_SavedSheet> {
                   Container(
                     width: 48,
                     height: 48,
-                    decoration: const BoxDecoration(
-                      color: C.ok,
+                    decoration: BoxDecoration(
+                      color: failed ? C.danger : C.ok,
                       shape: BoxShape.circle,
                     ),
-                    child: const Icon(Ic.check, size: 28, color: C.bgDeep),
+                    child: Icon(
+                      failed ? Icons.priority_high_rounded : Ic.check,
+                      size: 28,
+                      color: C.bgDeep,
+                    ),
                   ),
                   const SizedBox(width: 14),
                   Column(
                     crossAxisAlignment: CrossAxisAlignment.start,
                     children: [
-                      Text('Saved to Notes', style: display(24)),
+                      Text(
+                        failed ? 'Couldn’t transcribe' : 'Saved to Notes',
+                        style: display(24),
+                      ),
                       const SizedBox(height: 2),
                       Text(
                         'Today ${formatClock(note.createdAt)} · ${formatDuration(note.durationMs)}',
@@ -114,14 +124,21 @@ class _SavedSheetState extends State<_SavedSheet> {
                 child: Column(
                   crossAxisAlignment: CrossAxisAlignment.start,
                   children: [
-                    Text(note.title, style: sans(16, weight: 600)),
-                    const SizedBox(height: 6),
-                    Text(
-                      note.body,
-                      maxLines: 6,
-                      overflow: TextOverflow.ellipsis,
-                      style: sans(15, color: C.textSoft, height: 1.5),
-                    ),
+                    if (failed)
+                      Text(
+                        note.error!,
+                        style: sans(15, color: C.textSoft, height: 1.5),
+                      )
+                    else ...[
+                      Text(note.title, style: sans(16, weight: 600)),
+                      const SizedBox(height: 6),
+                      Text(
+                        note.body,
+                        maxLines: 6,
+                        overflow: TextOverflow.ellipsis,
+                        style: sans(15, color: C.textSoft, height: 1.5),
+                      ),
+                    ],
                   ],
                 ),
               ),
@@ -130,8 +147,8 @@ class _SavedSheetState extends State<_SavedSheet> {
                 children: [
                   Expanded(
                     child: PillButton(
-                      label: 'Undo',
-                      icon: Ic.undo,
+                      label: failed ? 'Delete' : 'Undo',
+                      icon: failed ? Ic.delete : Ic.undo,
                       onPressed: () async {
                         await services.db.delete(note.id!);
                         widget.onChanged();
@@ -141,21 +158,30 @@ class _SavedSheetState extends State<_SavedSheet> {
                   ),
                   const SizedBox(width: 12),
                   Expanded(
-                    child: PillButton(
-                      label: 'Edit',
-                      icon: Ic.edit,
-                      onPressed: () async {
-                        final nav = Navigator.of(context);
-                        nav.pop();
-                        await nav.push(
-                          MaterialPageRoute<void>(
-                            builder: (_) =>
-                                NoteScreen(note: note, editing: true),
+                    child: failed
+                        ? PillButton(
+                            label: 'Retry',
+                            icon: Icons.refresh_rounded,
+                            onPressed: () {
+                              services.voice.retry(note.id!);
+                              Navigator.of(context).pop();
+                            },
+                          )
+                        : PillButton(
+                            label: 'Edit',
+                            icon: Ic.edit,
+                            onPressed: () async {
+                              final nav = Navigator.of(context);
+                              nav.pop();
+                              await nav.push(
+                                MaterialPageRoute<void>(
+                                  builder: (_) =>
+                                      NoteScreen(note: note, editing: true),
+                                ),
+                              );
+                              widget.onChanged();
+                            },
                           ),
-                        );
-                        widget.onChanged();
-                      },
-                    ),
                   ),
                   const SizedBox(width: 12),
                   Expanded(

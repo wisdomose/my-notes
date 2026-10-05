@@ -6,15 +6,31 @@ import 'package:record/record.dart';
 import 'package:shared_preferences/shared_preferences.dart';
 
 import '../data/settings.dart';
+import '../util/log_file.dart';
 import 'model_files.dart';
 import 'voice_engine.dart';
 import 'voice_task.dart';
 
 class SavedEvent {
-  const SavedEvent(this.noteId, {required this.byWake, required this.whisper});
+  const SavedEvent(
+    this.noteId, {
+    required this.byWake,
+    required this.whisper,
+    this.error,
+  });
   final int noteId;
   final bool byWake;
   final bool whisper;
+
+  /// Set when the note was saved but couldn't be transcribed.
+  final String? error;
+}
+
+/// A retry finished: [error] is null when the note now has its text.
+class RetryEvent {
+  const RetryEvent(this.noteId, this.error);
+  final int noteId;
+  final String? error;
 }
 
 /// UI-side handle on the background voice service.
@@ -41,7 +57,8 @@ class VoiceController extends ChangeNotifier {
   /// Diagnostics log (Settings → Diagnostics), newest last.
   final List<String> log = [];
 
-  void _addLog(String line) {
+  void _addLog(String line, {bool persist = true}) {
+    if (persist) LogFile.append('[app] $line');
     final t = DateTime.now();
     String two(int n) => n.toString().padLeft(2, '0');
     log.add('${two(t.hour)}:${two(t.minute)}:${two(t.second)} $line');
@@ -52,6 +69,11 @@ class VoiceController extends ChangeNotifier {
 
   final _saved = StreamController<SavedEvent>.broadcast();
   final _nothing = StreamController<void>.broadcast();
+  final _retried = StreamController<RetryEvent>.broadcast();
+  Stream<RetryEvent> get retried => _retried.stream;
+
+  /// Notes being re-transcribed right now.
+  final Set<int> retrying = {};
   Stream<SavedEvent> get saved => _saved.stream;
   Stream<void> get nothingHeard => _nothing.stream;
 
@@ -122,15 +144,20 @@ class VoiceController extends ChangeNotifier {
             data['id'] as int,
             byWake: data['byWake'] == true,
             whisper: data['whisper'] == true,
+            error: data['error'] as String?,
           ),
         );
+      case Msg.retried:
+        retrying.remove(data['id']);
+        _retried.add(RetryEvent(data['id'] as int, data['error'] as String?));
       case Msg.nothing:
         _nothing.add(null);
       case Msg.error:
         error = data['message'] as String?;
         _addLog('ERROR ${data['message']}');
       case Msg.log:
-        _addLog(data['line'] as String? ?? '');
+        // The service already wrote it to the log file.
+        _addLog(data['line'] as String? ?? '', persist: false);
         final st = data['status'] as String?;
         if (st != null) {
           status = st;
@@ -300,6 +327,26 @@ class VoiceController extends ChangeNotifier {
 
   void stopCapture() => FlutterForegroundTask.sendDataToTask({'cmd': Msg.stop});
 
+  /// Re-transcribes a note that failed, with the engine selected now.
+  Future<void> retry(int noteId) async {
+    retrying.add(noteId);
+    notifyListeners();
+    _addLog('retry note $noteId');
+    if (await FlutterForegroundTask.isRunningService) {
+      FlutterForegroundTask.sendDataToTask({'cmd': Msg.retry, 'id': noteId});
+      return;
+    }
+    await FlutterForegroundTask.saveData(
+      key: Msg.pendingRetryKey,
+      value: noteId,
+    );
+    if (!await _startService()) {
+      retrying.remove(noteId);
+      _retried.add(RetryEvent(noteId, 'The voice service couldn’t start'));
+      notifyListeners();
+    }
+  }
+
   void cancelCapture() =>
       FlutterForegroundTask.sendDataToTask({'cmd': Msg.cancel});
 
@@ -313,6 +360,7 @@ class VoiceController extends ChangeNotifier {
     FlutterForegroundTask.removeTaskDataCallback(_onData);
     _saved.close();
     _nothing.close();
+    _retried.close();
     super.dispose();
   }
 }

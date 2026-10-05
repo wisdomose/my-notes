@@ -10,18 +10,35 @@ import 'offline_asr.dart';
 
 enum EngineState { idle, capturing, transcribing }
 
+/// A transcriber failure with a message fit to show the user.
+class TranscriptionError implements Exception {
+  TranscriptionError(this.message);
+  final String message;
+  @override
+  String toString() => message;
+}
+
 class CaptureResult {
   CaptureResult({
     required this.text,
     required this.samples,
     required this.byWake,
     required this.usedWhisper,
+    this.error,
   });
 
   final String text;
   final Float32List samples;
   final bool byWake;
+
+  /// The text came from the accurate transcriber (cloud or on-device
+  /// model), not the streaming preview.
   final bool usedWhisper;
+
+  /// Why transcription failed. The note is kept (with its audio) and
+  /// marked "not transcribed": no quiet switch to another model.
+  final String? error;
+  bool get failed => error != null;
 
   int get durationMs => samples.length * 1000 ~/ VoiceEngine.sampleRate;
 }
@@ -328,10 +345,11 @@ class VoiceEngine {
 
     var text = '';
     var usedWhisper = false;
+    String? error;
     final segments = List.of(_segments);
+    final remote = transcriber;
     if (segments.isNotEmpty) {
       String? raw;
-      final remote = transcriber;
       final local = _whisper;
       try {
         if (remote != null) {
@@ -339,8 +357,9 @@ class VoiceEngine {
         } else if (local != null) {
           raw = offlineTranscribe(local, segments, sampleRate);
         }
-      } catch (_) {
-        // Fall back to the streaming model's text below.
+      } catch (e) {
+        // With a transcriber, failure is reported, never papered over.
+        error = e is TranscriptionError ? e.message : '$e';
       }
       if (raw != null) {
         text = cleanTranscript(raw);
@@ -349,7 +368,9 @@ class VoiceEngine {
     }
 
     final asr = _asrStream!;
-    if (text.isEmpty) {
+    // The streaming preview text is only used when there's no transcriber
+    // at all (host tests, or an engine without one).
+    if (text.isEmpty && error == null && remote == null) {
       asr.acceptWaveform(
         samples: Float32List(sampleRate ~/ 2),
         sampleRate: sampleRate,
@@ -367,7 +388,15 @@ class VoiceEngine {
     _setState(EngineState.idle);
 
     onDone?.call(
-      text.isEmpty
+      error != null
+          ? CaptureResult(
+              text: '',
+              samples: audio,
+              byWake: _byWake,
+              usedWhisper: false,
+              error: error,
+            )
+          : text.isEmpty
           ? null
           : CaptureResult(
               text: text,

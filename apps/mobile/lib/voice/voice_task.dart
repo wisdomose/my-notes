@@ -6,6 +6,7 @@ import 'package:audioplayers/audioplayers.dart';
 import 'package:flutter/widgets.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:hey_overlay/hey_overlay.dart' as ho;
+import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 import 'package:record/record.dart';
 import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
@@ -13,6 +14,8 @@ import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
 import '../data/note.dart';
 import '../data/notes_db.dart';
 import '../data/settings.dart';
+import '../util/log_file.dart';
+import '../util/memory.dart';
 import '../util/text.dart';
 import 'cloud.dart';
 import 'model_files.dart';
@@ -27,6 +30,7 @@ abstract final class Msg {
   static const cancel = 'cancel';
   static const reload = 'reload';
   static const ping = 'ping';
+  static const retry = 'retry';
 
   // service -> UI
   static const state = 'state';
@@ -34,6 +38,7 @@ abstract final class Msg {
   static const saved = 'saved';
   static const nothing = 'nothing';
   static const error = 'error';
+  static const retried = 'retried';
 
   /// One diagnostics line: {'type': log, 'line': ..., 'status': ...?}.
   static const log = 'log';
@@ -41,6 +46,9 @@ abstract final class Msg {
   /// Saved with FlutterForegroundTask.saveData so a capture requested before
   /// the service finished starting isn't lost.
   static const pendingStartKey = 'pendingStart';
+
+  /// A note id to retry once the service has started.
+  static const pendingRetryKey = 'pendingRetry';
 }
 
 /// Entry point of the foreground service's isolate.
@@ -62,9 +70,6 @@ class VoiceTaskHandler extends TaskHandler {
   StreamSubscription<Uint8List>? _mic;
   VoiceEngine? _engine;
 
-  /// Loaded on-device models (see [_syncWorkers]).
-  final _workers = <OfflineModel, OfflineWorker>{};
-  final _workersStarting = <OfflineModel, Future<void>>{};
   final _cloud = CloudTranscriber();
 
   /// Which engine produced the last transcript, for the log and the UI.
@@ -101,6 +106,7 @@ class VoiceTaskHandler extends TaskHandler {
   /// Sends a diagnostics line to the UI (Settings → Diagnostics). [status]
   /// is a short user-facing state shown while waiting to capture.
   void _log(String line, {String? status, bool error = false}) {
+    LogFile.append('[service] ${error ? 'ERROR ' : ''}$line');
     FlutterForegroundTask.sendDataToMain({
       'type': Msg.log,
       'line': line,
@@ -155,7 +161,6 @@ class VoiceTaskHandler extends TaskHandler {
         '(engine: ${_settings.engine})',
         status: 'Ready',
       );
-      _syncWorkers();
 
       // Beeps are nice to have; never let them stop the service.
       try {
@@ -176,6 +181,13 @@ class VoiceTaskHandler extends TaskHandler {
         _pendingStart = false;
         _log('starting the capture requested while loading');
         engine.start();
+      }
+      final pendingRetry = await FlutterForegroundTask.getData<int>(
+        key: Msg.pendingRetryKey,
+      );
+      if (pendingRetry != null) {
+        await FlutterForegroundTask.removeData(key: Msg.pendingRetryKey);
+        _retry(pendingRetry);
       }
       step = 'starting microphone';
       await _syncMic();
@@ -296,6 +308,9 @@ class VoiceTaskHandler extends TaskHandler {
         engine?.cancel();
       case Msg.reload:
         _reload();
+      case Msg.retry:
+        final id = data['id'];
+        if (id is int) _retry(id);
       case Msg.ping:
         _sendState();
         _log(
@@ -323,117 +338,158 @@ class VoiceTaskHandler extends TaskHandler {
       ..wakeEnabled = _settings.wakeEnabled
       ..silenceSecs = _settings.silenceSecs
       ..sensitivity = _settings.sensitivity;
-    _syncWorkers();
     await _syncMic().catchError(_micFailed);
     await _stopIfUnneeded();
     _updateNotification();
   }
 
-  /// Speech segments → text. Cloud (Intron Sahara via the Hey Notes API)
-  /// when chosen, falling back to an on-device model when offline, slow or
-  /// failing; otherwise the chosen on-device model (Whisper or Parakeet),
-  /// then any other loaded one. Throwing makes the engine use the
-  /// streaming model's text, so a note is never lost.
+  /// Speech segments → text with the engine the user chose, and only that
+  /// one. Failures throw a [TranscriptionError] with a reason fit to show;
+  /// the note is then kept as "not transcribed" (no quiet fallback).
   Future<String> _transcribe(List<Float32List> segments) async {
     final secs =
         (segments.fold(0, (n, s) => n + s.length) / VoiceEngine.sampleRate)
             .toStringAsFixed(1);
-    if (_settings.engine == AppSettings.engineCloud) {
-      final sw = Stopwatch()..start();
+    final sw = Stopwatch()..start();
+    final model = AppSettings.modelFor(_settings.engine);
+    if (model == null) {
       try {
         final text = await _cloud
             .transcribe(segments, VoiceEngine.sampleRate)
             .timeout(const Duration(seconds: 20));
-        _lastEngine = 'Sahara';
-        _log(
-          'Sahara (cloud): $secs s of speech in ${sw.elapsedMilliseconds} ms',
-        );
+        _lastEngine = 'Cloud';
+        _log('Cloud: $secs s of speech in ${sw.elapsedMilliseconds} ms');
         return text;
       } catch (e) {
         _log(
-          'cloud failed after ${sw.elapsedMilliseconds} ms ($e); using on-device',
+          'cloud failed after ${sw.elapsedMilliseconds} ms: $e',
           error: true,
         );
+        throw TranscriptionError(_cloudReason(e));
       }
     }
-    // On-device: the chosen model first, then whatever else is loaded.
-    final order = switch (_settings.engine) {
-      AppSettings.engineParakeet => [
-        OfflineModel.parakeet,
-        OfflineModel.whisper,
-      ],
-      _ => [OfflineModel.whisper, OfflineModel.parakeet],
-    };
-    for (final model in order) {
-      final worker = _workers[model];
-      if (worker == null) continue;
-      try {
-        // Never let a stuck worker leave the engine "transcribing" (deaf
-        // to the wake word) forever.
-        final text = await worker
-            .transcribe(segments, VoiceEngine.sampleRate)
-            .timeout(const Duration(seconds: 30));
-        _lastEngine = model.label;
-        _log(
-          '${model.label}: $secs s of speech in '
-          '${worker.lastDuration.inMilliseconds} ms '
-          '(${offlineThreads()} threads)',
+    return _transcribeOnDevice(model, segments, secs, sw);
+  }
+
+  /// Loads [model] just for this note, transcribes, and unloads it, so
+  /// nothing heavy sits in memory while listening for "Hey Notes".
+  Future<String> _transcribeOnDevice(
+    OfflineModel model,
+    List<Float32List> segments,
+    String secs,
+    Stopwatch sw,
+  ) async {
+    final paths = _engine!.paths;
+    if (!paths.isReady(model)) {
+      throw TranscriptionError('${model.label} isn’t downloaded');
+    }
+    final mem = await DeviceMemory.read();
+    if (mem != null && !model.supportsDevice(mem.total)) {
+      throw TranscriptionError('This phone can’t run ${model.label}');
+    }
+    if (mem != null && mem.available < model.runtimeBytes * 1.1) {
+      _log(
+        '${model.label}: needs ${model.runtimeBytes ~/ mb} MB, '
+        '${mem.available ~/ mb} MB free',
+        error: true,
+      );
+      throw TranscriptionError('Not enough free memory for ${model.label}');
+    }
+    OfflineWorker? worker;
+    try {
+      worker = await OfflineWorker.spawn(
+        model,
+        paths,
+      ).timeout(const Duration(seconds: 60));
+      final loadMs = sw.elapsedMilliseconds;
+      final text = await worker
+          .transcribe(segments, VoiceEngine.sampleRate)
+          .timeout(const Duration(seconds: 90));
+      _lastEngine = model.label;
+      _log(
+        '${model.label}: $secs s of speech in '
+        '${worker.lastDuration.inMilliseconds} ms '
+        '(+$loadMs ms to load, ${offlineThreads()} threads)',
+      );
+      return text;
+    } on TimeoutException {
+      _log(
+        '${model.label} timed out after ${sw.elapsedMilliseconds} ms',
+        error: true,
+      );
+      throw TranscriptionError('${model.label} took too long');
+    } catch (e) {
+      _log('${model.label} failed: $e', error: true);
+      throw TranscriptionError('${model.label} couldn’t run');
+    } finally {
+      worker?.dispose();
+    }
+  }
+
+  static String _cloudReason(Object e) {
+    if (e is TimeoutException) return 'The cloud took too long';
+    if (e is SocketException || e is http.ClientException) {
+      return 'No internet connection';
+    }
+    if (e is CloudError && e.message.startsWith('HTTP 429')) {
+      return 'Too many notes right now, try again in a minute';
+    }
+    return 'The cloud couldn’t transcribe it';
+  }
+
+  /// Re-transcribes a note that failed, with the engine chosen now.
+  Future<void> _retry(int id) async {
+    final note = await _db.get(id);
+    final audio = note?.audioPath;
+    if (note == null || audio == null || !File(audio).existsSync()) {
+      FlutterForegroundTask.sendDataToMain({
+        'type': Msg.retried,
+        'id': id,
+        'error': 'The recording for this note is gone',
+      });
+      return;
+    }
+    _log('retrying note $id');
+    final samples = so.readWave(audio).samples;
+    // Whisper takes at most 30 s at a time.
+    const step = 25 * VoiceEngine.sampleRate;
+    final segments = [
+      for (var i = 0; i < samples.length; i += step)
+        Float32List.sublistView(
+          samples,
+          i,
+          (i + step).clamp(0, samples.length),
+        ),
+    ];
+    String? error;
+    try {
+      final text = cleanTranscript(await _transcribe(segments));
+      if (text.isEmpty) {
+        error = 'Nothing to transcribe in this recording';
+      } else {
+        var updated = note.copyWith(
+          title: makeTitle(text),
+          body: text,
+          error: () => null,
         );
-        return text;
-      } catch (e) {
-        _log('${model.label} failed: $e', error: true);
-      }
-    }
-    _lastEngine = 'streaming';
-    throw StateError('no on-device model is available');
-  }
-
-  /// Which on-device models to keep loaded: Whisper whenever it's
-  /// downloaded (small; the fallback for cloud), Parakeet only while it's
-  /// the chosen engine (it needs ~0.9 GB of memory).
-  Set<OfflineModel> get _wantedModels {
-    final paths = _engine?.paths;
-    if (paths == null) return {};
-    return {
-      if (paths.isReady(OfflineModel.whisper)) OfflineModel.whisper,
-      if (_settings.engine == AppSettings.engineParakeet &&
-          paths.isReady(OfflineModel.parakeet))
-        OfflineModel.parakeet,
-    };
-  }
-
-  /// Loads and unloads on-device models to match [_wantedModels].
-  void _syncWorkers() {
-    final engine = _engine;
-    if (engine == null) return;
-    final wanted = _wantedModels;
-    for (final m in _workers.keys.toList()) {
-      if (!wanted.contains(m)) {
-        _workers.remove(m)?.dispose();
-        _log('${m.label} unloaded');
-      }
-    }
-    for (final m in wanted) {
-      if (_workers.containsKey(m) || _workersStarting.containsKey(m)) continue;
-      final sw = Stopwatch()..start();
-      _workersStarting[m] = () async {
-        try {
-          final w = await OfflineWorker.spawn(m, engine.paths);
-          if (_wantedModels.contains(m)) {
-            _workers[m] = w;
-            _log(
-              '${m.label} ready on its own thread in ${sw.elapsedMilliseconds} ms',
-            );
-          } else {
-            w.dispose();
-          }
-        } catch (e) {
-          _log('${m.label} failed to load: $e', error: true);
-        } finally {
-          _workersStarting.remove(m);
+        // The recording was only kept so the note could be retried.
+        if (!_settings.keepAudio) {
+          updated = updated.withoutAudio();
+          await File(audio).delete().catchError((_) => File(audio));
         }
-      }();
+        await _db.update(updated);
+        _log('retry succeeded for note $id');
+      }
+    } on TranscriptionError catch (e) {
+      error = e.message;
     }
+    if (error != null) await _db.update(note.copyWith(error: () => error));
+    FlutterForegroundTask.sendDataToMain({
+      'type': Msg.retried,
+      'id': id,
+      'error': ?error,
+    });
+    await _stopIfUnneeded();
   }
 
   /// The mic is on while listening for the wake word or capturing a note.
@@ -626,7 +682,8 @@ class VoiceTaskHandler extends TaskHandler {
     }
     try {
       String? audioPath;
-      if (_settings.keepAudio) {
+      // A failed note always keeps its recording, so it can be retried.
+      if (_settings.keepAudio || result.failed) {
         final dir = Directory(
           '${(await getApplicationSupportDirectory()).path}/audio',
         );
@@ -640,29 +697,45 @@ class VoiceTaskHandler extends TaskHandler {
           audioPath = null;
         }
       }
+      final failed = result.error;
       final note = Note(
-        title: makeTitle(result.text),
+        title: failed != null ? 'Not transcribed' : makeTitle(result.text),
         body: result.text,
         createdAt: DateTime.now(),
         durationMs: result.durationMs,
         audioPath: audioPath,
+        error: failed,
       );
       final id = await _db.insert(note);
-      _log(
-        'note saved: ${result.durationMs ~/ 1000} s, '
-        '${result.text.split(' ').length} words, '
-        '${result.usedWhisper ? _lastEngine : 'streaming model'}',
-      );
-      if (_settings.beep) _play('sounds/saved.wav');
+      if (failed != null) {
+        _log(
+          'note $id saved NOT transcribed (${result.durationMs ~/ 1000} s): '
+          '$failed',
+          error: true,
+        );
+      } else {
+        _log(
+          'note saved: ${result.durationMs ~/ 1000} s, '
+          '${result.text.split(' ').length} words, '
+          '${result.usedWhisper ? _lastEngine : 'streaming model'}',
+        );
+        if (_settings.beep) _play('sounds/saved.wav');
+      }
       FlutterForegroundTask.sendDataToMain({
         'type': Msg.saved,
         'id': id,
         'byWake': result.byWake,
         'whisper': result.usedWhisper,
         'engine': result.usedWhisper ? _lastEngine : 'streaming',
+        'error': ?failed,
       });
-      _updateNotification(savedTitle: note.title);
-      _finishOverlay(ho.OverlayState.saved, text: note.title);
+      if (failed != null) {
+        _updateNotification(failedReason: failed);
+        _finishOverlay(ho.OverlayState.failed, text: failed);
+      } else {
+        _updateNotification(savedTitle: note.title);
+        _finishOverlay(ho.OverlayState.saved, text: note.title);
+      }
     } catch (e) {
       _finishOverlay(null);
       FlutterForegroundTask.sendDataToMain({
@@ -689,11 +762,15 @@ class VoiceTaskHandler extends TaskHandler {
     });
   }
 
-  Future<void> _updateNotification({String? savedTitle}) async {
+  Future<void> _updateNotification({
+    String? savedTitle,
+    String? failedReason,
+  }) async {
     final engine = _engine;
     final text = switch (engine?.state) {
       EngineState.capturing => 'Listening… speak your note',
       EngineState.transcribing => 'Transcribing…',
+      _ when failedReason != null => 'Couldn’t transcribe: $failedReason',
       _ when savedTitle != null => 'Saved: $savedTitle',
       _ when engine?.wakeEnabled ?? false => 'Listening for “Hey Notes”',
       _ => 'Ready',
@@ -712,10 +789,6 @@ class VoiceTaskHandler extends TaskHandler {
     _mic = null;
     await _recorder.dispose();
     await _player.dispose();
-    for (final w in _workers.values) {
-      w.dispose();
-    }
-    _workers.clear();
     _cloud.close();
     _engine?.dispose();
     _engine = null;

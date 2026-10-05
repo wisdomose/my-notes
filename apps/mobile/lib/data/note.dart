@@ -7,6 +7,7 @@ class Note {
     this.durationMs = 0,
     this.audioPath,
     this.source = 'voice',
+    this.error,
   });
 
   final int? id;
@@ -19,7 +20,17 @@ class Note {
   /// 'voice' or 'typed'.
   final String source;
 
-  Note copyWith({String? title, String? body, String? audioPath}) => Note(
+  /// Set when the note couldn't be transcribed (its audio is kept so it
+  /// can be retried). Null once it has text.
+  final String? error;
+  bool get failed => error != null;
+
+  Note copyWith({
+    String? title,
+    String? body,
+    String? audioPath,
+    String? Function()? error,
+  }) => Note(
     id: id,
     title: title ?? this.title,
     body: body ?? this.body,
@@ -27,6 +38,18 @@ class Note {
     durationMs: durationMs,
     audioPath: audioPath ?? this.audioPath,
     source: source,
+    error: error == null ? this.error : error(),
+  );
+
+  /// The same note with its recording reference dropped.
+  Note withoutAudio() => Note(
+    id: id,
+    title: title,
+    body: body,
+    createdAt: createdAt,
+    durationMs: durationMs,
+    source: source,
+    error: error,
   );
 
   Map<String, Object?> toMap() => {
@@ -37,6 +60,7 @@ class Note {
     'duration_ms': durationMs,
     'audio_path': audioPath,
     'source': source,
+    'error': error,
   };
 
   factory Note.fromMap(Map<String, Object?> m) => Note(
@@ -47,5 +71,6 @@ class Note {
     durationMs: m['duration_ms'] as int? ?? 0,
     audioPath: m['audio_path'] as String?,
     source: m['source'] as String? ?? 'voice',
+    error: m['error'] as String?,
   );
 }

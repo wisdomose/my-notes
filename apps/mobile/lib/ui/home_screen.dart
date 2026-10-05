@@ -47,6 +47,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   DateTime? _savedWhileAwayAt;
   late final StreamSubscription<SavedEvent> _savedSub;
   late final StreamSubscription<void> _nothingSub;
+  late final StreamSubscription<RetryEvent> _retrySub;
 
   @override
   void initState() {
@@ -57,6 +58,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _nothingSub = _voice.nothingHeard.listen((_) {
       if (mounted) showError(context, 'Didn’t catch anything. Try again.');
     });
+    _retrySub = _voice.retried.listen(_onRetried);
     _load();
     _checkOverlay();
     WidgetsBinding.instance.addPostFrameCallback((_) {
@@ -70,6 +72,7 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
     _voice.removeListener(_onVoice);
     _savedSub.cancel();
     _nothingSub.cancel();
+    _retrySub.cancel();
     _search.dispose();
     super.dispose();
   }
@@ -143,6 +146,21 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
       ),
     );
     _listeningOpen = false;
+  }
+
+  Future<void> _onRetried(RetryEvent e) async {
+    await _load();
+    if (!mounted) return;
+    if (e.error != null) {
+      showError(context, 'Still couldn’t transcribe: ${e.error}');
+    } else if (_foreground) {
+      // Only if nothing else (the note itself) is on top.
+      if (ModalRoute.of(context)?.isCurrent ?? false) {
+        _onSaved(SavedEvent(e.noteId, byWake: false, whisper: true));
+      } else {
+        showError(context, 'Transcribed');
+      }
+    }
   }
 
   Future<void> _onSaved(SavedEvent e) async {
@@ -573,10 +591,14 @@ class _NoteCard extends StatelessWidget {
               ),
               const SizedBox(height: 6),
               Text(
-                note.body,
+                note.failed ? note.error! : note.body,
                 maxLines: 2,
                 overflow: TextOverflow.ellipsis,
-                style: sans(14, color: C.textSoft, height: 1.45),
+                style: sans(
+                  14,
+                  color: note.failed ? C.danger : C.textSoft,
+                  height: 1.45,
+                ),
               ),
               if (note.source == 'voice') ...[
                 const SizedBox(height: 6),

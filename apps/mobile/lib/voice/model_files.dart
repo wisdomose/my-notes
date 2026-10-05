@@ -4,51 +4,131 @@ import 'package:flutter/services.dart';
 import 'package:http/http.dart' as http;
 import 'package:path_provider/path_provider.dart';
 
+enum ModelKind { whisper, nemoTransducer }
+
 /// The optional on-device transcription models, downloaded once from
-/// Hugging Face (int8 ONNX exports for sherpa-onnx).
+/// Hugging Face (int8 ONNX exports for sherpa-onnx). Each is loaded only
+/// while it transcribes a note, then unloaded.
 enum OfflineModel {
   whisper(
     label: 'Whisper',
     dir: 'whisper',
+    kind: ModelKind.whisper,
     baseUrl: 'https://huggingface.co/csukuangfj/sherpa-onnx-whisper-base.en/resolve/main',
+    encoder: 'base.en-encoder.int8.onnx',
+    decoder: 'base.en-decoder.int8.onnx',
+    tokens: 'base.en-tokens.txt',
     files: {
       'base.en-encoder.int8.onnx': 29120534,
       'base.en-decoder.int8.onnx': 130669978,
       'base.en-tokens.txt': 835554,
     },
+    runtimeBytes: 400 * mb,
+    minDeviceBytes: 3 * gb,
   ),
 
-  /// NVIDIA Parakeet TDT 0.6B v2 (CC-BY-4.0). Large: loaded only while
-  /// selected.
+  /// NVIDIA Parakeet TDT 0.6B v2 (CC-BY-4.0).
   parakeet(
     label: 'Parakeet',
     dir: 'parakeet',
+    kind: ModelKind.nemoTransducer,
     baseUrl: 'https://huggingface.co/csukuangfj/sherpa-onnx-nemo-parakeet-tdt-0.6b-v2-int8/resolve/main',
+    encoder: 'encoder.int8.onnx',
+    decoder: 'decoder.int8.onnx',
+    joiner: 'joiner.int8.onnx',
+    tokens: 'tokens.txt',
     files: {
       'encoder.int8.onnx': 652184296,
       'decoder.int8.onnx': 7257753,
       'joiner.int8.onnx': 1739080,
       'tokens.txt': 9384,
     },
+    runtimeBytes: 1000 * mb,
+    minDeviceBytes: 6 * gb,
+  ),
+
+  /// OpenAI Whisper large-v3-turbo (MIT).
+  whisperTurbo(
+    label: 'Whisper Turbo',
+    dir: 'whisper-turbo',
+    kind: ModelKind.whisper,
+    baseUrl: 'https://huggingface.co/csukuangfj/sherpa-onnx-whisper-turbo/resolve/main',
+    encoder: 'turbo-encoder.int8.onnx',
+    decoder: 'turbo-decoder.int8.onnx',
+    tokens: 'turbo-tokens.txt',
+    files: {
+      'turbo-encoder.int8.onnx': 674716297,
+      'turbo-decoder.int8.onnx': 361080764,
+      'turbo-tokens.txt': 816730,
+    },
+    runtimeBytes: 1500 * mb,
+    minDeviceBytes: 8 * gb,
+  ),
+
+  /// OpenAI Whisper large-v3 (MIT).
+  whisperLarge(
+    label: 'Whisper Large',
+    dir: 'whisper-large-v3',
+    kind: ModelKind.whisper,
+    baseUrl: 'https://huggingface.co/csukuangfj/sherpa-onnx-whisper-large-v3/resolve/main',
+    encoder: 'large-v3-encoder.int8.onnx',
+    decoder: 'large-v3-decoder.int8.onnx',
+    tokens: 'large-v3-tokens.txt',
+    files: {
+      'large-v3-encoder.int8.onnx': 766671985,
+      'large-v3-decoder.int8.onnx': 1008265203,
+      'large-v3-tokens.txt': 816730,
+    },
+    runtimeBytes: 2500 * mb,
+    minDeviceBytes: 12 * gb,
   );
 
   const OfflineModel({
     required this.label,
     required this.dir,
+    required this.kind,
     required this.baseUrl,
+    required this.encoder,
+    required this.decoder,
+    required this.tokens,
     required this.files,
+    required this.runtimeBytes,
+    required this.minDeviceBytes,
+    this.joiner,
   });
 
   final String label;
   final String dir;
+  final ModelKind kind;
   final String baseUrl;
+  final String encoder;
+  final String decoder;
+  final String? joiner;
+  final String tokens;
 
   /// File name → exact size in bytes (checked after download).
   final Map<String, int> files;
 
+  /// Memory it needs while loaded (checked against free memory first).
+  final int runtimeBytes;
+
+  /// Smallest phone it's offered on, by nominal RAM (a "6 GB" phone reports
+  /// a bit less, so the check allows 10% slack).
+  final int minDeviceBytes;
+
   int get bytes => files.values.reduce((a, b) => a + b);
-  String get sizeLabel => '${(bytes / 1e6).round()} MB';
+  String get sizeLabel => bytes >= gb
+      ? '${(bytes / gb).toStringAsFixed(1)} GB'
+      : '${(bytes / mb).round()} MB';
+
+  bool supportsDevice(int totalMemoryBytes) =>
+      totalMemoryBytes >= minDeviceBytes * 0.9;
+
+  String get minDeviceLabel => '${(minDeviceBytes / gb).round()} GB';
 }
+
+const mb = 1000 * 1000;
+const gb = 1000 * mb;
 
 /// Where the on-device models live. Bundled models are copied out of the
 /// APK on first launch (sherpa-onnx needs real file paths); the
@@ -73,17 +153,8 @@ class ModelPaths {
   String dirOf(OfflineModel m) => '$root/${m.dir}';
   bool isReady(OfflineModel m) => File('${dirOf(m)}/.complete').existsSync();
 
-  String get whisperDir => dirOf(OfflineModel.whisper);
-  String get whisperEncoder => '$whisperDir/base.en-encoder.int8.onnx';
-  String get whisperDecoder => '$whisperDir/base.en-decoder.int8.onnx';
-  String get whisperTokens => '$whisperDir/base.en-tokens.txt';
+  String fileOf(OfflineModel m, String name) => '${dirOf(m)}/$name';
   bool get whisperReady => isReady(OfflineModel.whisper);
-
-  String get parakeetDir => dirOf(OfflineModel.parakeet);
-  String get parakeetEncoder => '$parakeetDir/encoder.int8.onnx';
-  String get parakeetDecoder => '$parakeetDir/decoder.int8.onnx';
-  String get parakeetJoiner => '$parakeetDir/joiner.int8.onnx';
-  String get parakeetTokens => '$parakeetDir/tokens.txt';
 }
 
 class ModelFiles {

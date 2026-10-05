@@ -101,6 +101,28 @@ void main() {
     expect(notes.every((n) => n != null && n.contains('home')), isTrue);
   });
 
+  test('a failing transcriber gives a failed note, not preview text', () async {
+    final audio = so.readWave('test/fixtures/hey_notes_shopping.wav').samples;
+    final engine = VoiceEngine(paths)..init(loadWhisper: false);
+    engine.transcriber = (_) async =>
+        throw TranscriptionError('No internet connection');
+    final done = Completer<CaptureResult?>();
+    engine.onDone = done.complete;
+    for (var i = 0; i < audio.length; i += 1600) {
+      engine.accept(
+        Float32List.sublistView(audio, i, (i + 1600).clamp(0, audio.length)),
+      );
+      await Future<void>.delayed(Duration.zero);
+    }
+    final r = await done.future.timeout(const Duration(seconds: 30));
+    engine.dispose();
+    expect(r, isNotNull);
+    expect(r!.failed, isTrue);
+    expect(r.error, 'No internet connection');
+    expect(r.text, isEmpty, reason: 'no quiet fallback to preview text');
+    expect(r.samples.length, greaterThan(16000), reason: 'audio kept');
+  });
+
   test('speech without the wake word is ignored', () {
     final run = feed('test/fixtures/no_wake_word.wav');
     expect(run.states, isEmpty);

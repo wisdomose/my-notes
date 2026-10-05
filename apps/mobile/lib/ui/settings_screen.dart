@@ -5,6 +5,7 @@ import 'package:hey_overlay/hey_overlay.dart';
 import '../data/settings.dart';
 import '../main.dart';
 import '../theme.dart';
+import '../util/memory.dart';
 import '../voice/model_download.dart';
 import '../voice/model_files.dart';
 import 'diagnostics_screen.dart';
@@ -153,8 +154,7 @@ class _SettingsScreenState extends State<SettingsScreen>
             const SizedBox(height: 10),
             _group([
               _engineRow(AppSettings.engineCloud, 'Cloud'),
-              _modelRow(OfflineModel.whisper, AppSettings.engineDevice),
-              _modelRow(OfflineModel.parakeet, AppSettings.engineParakeet),
+              for (final m in OfflineModel.values) _modelRow(m),
             ]),
             const SizedBox(height: 18),
             _group([
@@ -285,7 +285,12 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   /// A selectable transcription option. [trailing] replaces the radio
   /// (Whisper shows a download button until its model is on the phone).
-  Widget _engineRow(String value, String title, {Widget? trailing}) {
+  Widget _engineRow(
+    String value,
+    String title, {
+    Widget? trailing,
+    Future<bool> Function()? canSelect,
+  }) {
     final selected = _s.engine == value;
     final selectable = trailing == null;
     return Semantics(
@@ -293,7 +298,8 @@ class _SettingsScreenState extends State<SettingsScreen>
       inMutuallyExclusiveGroup: true,
       child: _row(
         onTap: selectable
-            ? () {
+            ? () async {
+                if (canSelect != null && !await canSelect()) return;
                 _s.engine = value;
                 _changed();
               }
@@ -322,7 +328,31 @@ class _SettingsScreenState extends State<SettingsScreen>
 
   /// An on-device model: a download button until it's on the phone, a
   /// progress ring while it downloads, then a radio like Cloud.
-  Widget _modelRow(OfflineModel model, String engine) {
+  /// Refuses a model the phone can't run, with a dialog saying so.
+  Future<bool> _supported(OfflineModel model) async {
+    final mem = await DeviceMemory.read();
+    if (mem == null || model.supportsDevice(mem.total)) return true;
+    if (!mounted) return false;
+    await showDialog<void>(
+      context: context,
+      builder: (context) => AlertDialog(
+        title: Text('${model.label} isn’t supported on this phone'),
+        content: Text(
+          'It needs a phone with at least ${model.minDeviceLabel} of memory.',
+        ),
+        actions: [
+          TextButton(
+            onPressed: () => Navigator.pop(context),
+            child: Text('OK', style: sans(15, weight: 600, color: C.accent)),
+          ),
+        ],
+      ),
+    );
+    return false;
+  }
+
+  Widget _modelRow(OfflineModel model) {
+    final engine = AppSettings.engineFor(model);
     final d = services.downloads[model]!;
     return ListenableBuilder(
       listenable: d,
@@ -348,7 +378,9 @@ class _SettingsScreenState extends State<SettingsScreen>
             tooltip: d.status == ModelStatus.failed
                 ? 'Retry download'
                 : 'Download ${model.label} (${model.sizeLabel})',
-            onPressed: d.start,
+            onPressed: () async {
+              if (await _supported(model)) d.start();
+            },
             icon: Icon(
               d.status == ModelStatus.failed
                   ? Icons.refresh_rounded
@@ -357,7 +389,12 @@ class _SettingsScreenState extends State<SettingsScreen>
             ),
           ),
         };
-        return _engineRow(engine, model.label, trailing: trailing);
+        return _engineRow(
+          engine,
+          model.label,
+          trailing: trailing,
+          canSelect: () => _supported(model),
+        );
       },
     );
   }

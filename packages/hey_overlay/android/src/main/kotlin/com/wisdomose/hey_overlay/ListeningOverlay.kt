@@ -29,13 +29,14 @@ import android.widget.TextView
  */
 @SuppressLint("StaticFieldLeak") // holds the application context only
 class ListeningOverlay private constructor(private val context: Context) {
-    enum class State { LISTENING, TRANSCRIBING, SAVED, NOTHING }
+    enum class State { LISTENING, TRANSCRIBING, SAVED, NOTHING, FAILED }
 
     companion object {
         // Palette from the app's design canvas.
         const val AMBER = 0xFFF5B841.toInt()
         const val GREEN = 0xFF6FD08C.toInt()
         const val MUTED = 0xFF9BA39E.toInt()
+        const val DANGER = 0xFFFF8A7A.toInt()
         private const val SURFACE = 0xFF1A1F1D.toInt()
         private const val BORDER = 0xFF2A302D.toInt()
         private const val TEXT = 0xFFECEFEA.toInt()
@@ -237,6 +238,13 @@ class ListeningOverlay private constructor(private val context: Context) {
                 glow.color = MUTED
                 glow.intensity = 0.6f
                 icon.mode = StatusIconView.Mode.NOTHING
+            }
+            State.FAILED -> {
+                title.text = "Couldn’t transcribe"
+                subtitle.ellipsize = TextUtils.TruncateAt.END
+                glow.color = DANGER
+                glow.intensity = 0.8f
+                icon.mode = StatusIconView.Mode.FAILED
             }
         }
     }

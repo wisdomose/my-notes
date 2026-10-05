@@ -15,7 +15,7 @@ class NotesDb {
     final dir = await getDatabasesPath();
     final db = await openDatabase(
       p.join(dir, 'notes.db'),
-      version: 1,
+      version: 2,
       onCreate: (db, _) => db.execute('''
         CREATE TABLE notes (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -24,9 +24,16 @@ class NotesDb {
           created_at INTEGER NOT NULL,
           duration_ms INTEGER NOT NULL DEFAULT 0,
           audio_path TEXT,
-          source TEXT NOT NULL DEFAULT 'voice'
+          source TEXT NOT NULL DEFAULT 'voice',
+          error TEXT
         )
       '''),
+      onUpgrade: (db, from, _) async {
+        // v2: notes that couldn't be transcribed.
+        if (from < 2) {
+          await db.execute('ALTER TABLE notes ADD COLUMN error TEXT');
+        }
+      },
     );
     return NotesDb._(db);
   }

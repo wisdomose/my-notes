@@ -41,6 +41,18 @@ class _NoteScreenState extends State<NoteScreen> {
     super.initState();
     _subs
       ..add(
+        services.voice.retried.listen((e) async {
+          if (e.noteId != _note.id) return;
+          final fresh = await services.db.get(e.noteId);
+          if (!mounted || fresh == null) return;
+          setState(() {
+            _note = fresh;
+            _title.text = fresh.title;
+            _body.text = fresh.body;
+          });
+        }),
+      )
+      ..add(
         _player.onPlayerStateChanged.listen((s) {
           if (mounted) setState(() => _playing = s == PlayerState.playing);
         }),
@@ -201,6 +213,8 @@ class _NoteScreenState extends State<NoteScreen> {
                           isDense: true,
                         ),
                       )
+                    else if (_note.failed)
+                      _failedPanel()
                     else
                       SelectableText(_note.body, style: sans(18, height: 1.6)),
                   ],
@@ -210,6 +224,53 @@ class _NoteScreenState extends State<NoteScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// A note that couldn't be transcribed: the reason and a Retry button.
+  Widget _failedPanel() {
+    final busy = services.voice.retrying.contains(_note.id);
+    return Container(
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: C.surface,
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text('Not transcribed', style: sans(16, weight: 600)),
+                const SizedBox(height: 4),
+                Text(_note.error!, style: sans(14, color: C.danger)),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          busy
+              ? const SizedBox(
+                  width: 24,
+                  height: 24,
+                  child: CircularProgressIndicator(
+                    strokeWidth: 2.5,
+                    color: C.accent,
+                  ),
+                )
+              : PillButton(
+                  label: 'Retry',
+                  icon: Icons.refresh_rounded,
+                  height: 44,
+                  filled: true,
+                  fill: C.accent,
+                  onPressed: () async {
+                    await services.voice.retry(_note.id!);
+                    if (mounted) setState(() {});
+                  },
+                ),
+        ],
       ),
     );
   }

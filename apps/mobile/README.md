@@ -18,9 +18,17 @@ All speech runs on-device with [sherpa-onnx](https://github.com/k2-fsa/sherpa-on
 | Wake word | zipformer KWS (gigaspeech 3.3M), int8 | bundled |
 | Live text while you talk | streaming zipformer en 20M, int8 | bundled |
 | End of speech | Silero VAD | bundled |
-| Final text (default) | Intron Sahara via `apps/api` | cloud; falls back on-device |
-| Final text, on-device | Whisper base.en int8 (~160 MB) | optional download |
-| Final text, on-device | NVIDIA Parakeet TDT 0.6B v2 int8 (~661 MB) | optional download; loaded only while selected (~0.9 GB RAM) |
+| Final text (default) | Intron Sahara via `apps/api` | cloud |
+| Final text, on-device | Whisper base.en int8 (161 MB) | download; phones ≥ 3 GB RAM |
+| Final text, on-device | NVIDIA Parakeet TDT 0.6B v2 int8 (661 MB) | download; phones ≥ 6 GB |
+| Final text, on-device | Whisper large-v3-turbo int8 (1.0 GB) | download; phones ≥ 8 GB |
+| Final text, on-device | Whisper large-v3 int8 (1.8 GB) | download; phones ≥ 12 GB |
+
+Only the engine the user picked is used: if it fails (offline, low memory,
+error, timeout) the note is saved with its audio, marked "not transcribed"
+with the reason, and can be retried. On-device models are loaded only while
+transcribing a note, after checking free memory. Settings refuses models the
+phone can't run.
 
 Whisper is far better with Nigerian English than the small streaming model,
 so when it's downloaded it re-transcribes each speech segment and that text

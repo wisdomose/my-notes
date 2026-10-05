@@ -1,3 +1,5 @@
+import '../voice/model_files.dart';
+
 import 'package:shared_preferences/shared_preferences.dart';
 
 /// User settings. Uses the uncached async API so the UI and the background
@@ -33,6 +35,19 @@ class AppSettings {
   static const engineCloud = 'cloud';
   static const engineDevice = 'device';
   static const engineParakeet = 'parakeet';
+
+  /// The engine value for an on-device model (Whisper keeps its original
+  /// value so existing settings still work).
+  static String engineFor(OfflineModel m) =>
+      m == OfflineModel.whisper ? engineDevice : m.name;
+
+  /// The on-device model for [engine], or null for cloud.
+  static OfflineModel? modelFor(String engine) => engine == engineCloud
+      ? null
+      : OfflineModel.values.firstWhere(
+          (m) => engineFor(m) == engine,
+          orElse: () => OfflineModel.whisper,
+        );
 
   static const silenceOptions = [1.5, 2.0, 3.0];
 

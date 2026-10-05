@@ -19,6 +19,9 @@ enum OverlayState {
 
   /// "Didn't catch that".
   nothing,
+
+  /// "Couldn't transcribe", with the reason.
+  failed,
 }
 
 class HeyOverlay {

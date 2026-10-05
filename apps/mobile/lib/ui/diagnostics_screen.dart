@@ -3,6 +3,7 @@ import 'package:flutter/services.dart';
 
 import '../main.dart';
 import '../theme.dart';
+import '../util/log_file.dart';
 import 'widgets.dart';
 
 /// What the voice service has been doing. Meant for screenshots when
@@ -22,6 +23,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     super.initState();
     _voice.addListener(_changed);
     _voice.refresh();
+    _changed();
   }
 
   @override
@@ -30,13 +32,17 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
     super.dispose();
   }
 
-  void _changed() {
-    if (mounted) setState(() {});
+  /// The saved log (it survives the app being killed), newest first.
+  List<String> _lines = [];
+
+  Future<void> _changed() async {
+    final lines = await LogFile.read();
+    if (mounted) setState(() => _lines = lines.reversed.toList());
   }
 
   @override
   Widget build(BuildContext context) {
-    final lines = _voice.log.reversed.toList();
+    final lines = _lines;
     return Scaffold(
       body: SafeArea(
         child: Column(
@@ -58,7 +64,7 @@ class _DiagnosticsScreenState extends State<DiagnosticsScreen> {
                     tooltip: 'Copy log',
                     onPressed: () async {
                       await Clipboard.setData(
-                        ClipboardData(text: _voice.log.join('\n')),
+                        ClipboardData(text: _lines.reversed.join('\n')),
                       );
                       if (context.mounted) showError(context, 'Log copied');
                     },

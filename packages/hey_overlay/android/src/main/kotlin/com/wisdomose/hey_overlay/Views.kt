@@ -48,7 +48,7 @@ internal class EdgeGlowView(context: Context) : View(context) {
 
 /** 44 dp status icon: mic (pulses with [level]), spinner, check, or "×". */
 internal class StatusIconView(context: Context) : View(context) {
-    enum class Mode { MIC, SPINNER, CHECK, NOTHING }
+    enum class Mode { MIC, SPINNER, CHECK, NOTHING, FAILED }
 
     var mode = Mode.MIC
         set(value) {
@@ -125,6 +125,16 @@ internal class StatusIconView(context: Context) : View(context) {
                 path.lineTo(cx - 2.5f * u, cy + 6 * u)
                 path.lineTo(cx + 8.5f * u, cy - 6 * u)
                 canvas.drawPath(path, stroke)
+            }
+            Mode.FAILED -> {
+                // "!" on the danger colour.
+                fill.color = ListeningOverlay.DANGER
+                canvas.drawCircle(cx, cy, r, fill)
+                stroke.color = ink
+                stroke.strokeWidth = 3.2f * u
+                canvas.drawLine(cx, cy - 8 * u, cx, cy + 2 * u, stroke)
+                fill.color = ink
+                canvas.drawCircle(cx, cy + 7.5f * u, 2f * u, fill)
             }
             Mode.NOTHING -> {
                 fill.color = 0xFF3A403C.toInt()
