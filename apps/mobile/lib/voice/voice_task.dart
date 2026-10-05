@@ -84,13 +84,17 @@ class VoiceTaskHandler extends TaskHandler {
   int _pcmChunks = 0;
   bool _acceptFailed = false;
 
-  // Mic health, reported every 30 s (onRepeatEvent). Pure digital silence
-  // (peak exactly 0) means Android muted the mic for a background app; a
-  // real quiet room still has noise.
+  // Mic watchdog, every 10 s (onRepeatEvent). No audio, or pure digital
+  // silence (peak exactly 0; a real quiet room still has noise) while
+  // waiting for the wake word, means the stream is stuck or muted: restart
+  // it. A summary is logged every 30 s.
   int _healthChunks = 0;
   int _healthPeak = 0;
-  int _silentReports = 0;
+  int _silentChecks = 0;
+  int _healthTicks = 0;
+  DateTime _lastRestart = DateTime(0);
   bool _warnedMuted = false;
+  bool _restartingMic = false;
 
   /// Sends a diagnostics line to the UI (Settings → Diagnostics). [status]
   /// is a short user-facing state shown while waiting to capture.
@@ -194,32 +198,70 @@ class VoiceTaskHandler extends TaskHandler {
     final peak = _healthPeak / 32768;
     _healthChunks = 0;
     _healthPeak = 0;
-    if (_mic == null) return;
+    final engine = _engine;
+    if (engine == null) return;
+    final needMic = engine.wakeEnabled || engine.state != EngineState.idle;
+    if (!needMic) return;
+    if (_mic == null) {
+      // A failed (re)start: keep trying.
+      await _restartMic('microphone was off');
+      return;
+    }
     final open = await FlutterForegroundTask.isAppOnForeground;
-    _log(
-      'mic health (app ${open ? 'open' : 'in background'}): '
-      '$chunks chunks in 30 s, peak ${(peak * 100).toStringAsFixed(1)}%',
-    );
+    if (++_healthTicks % 3 == 0) {
+      _log(
+        'mic health (app ${open ? 'open' : 'in background'}, '
+        '${engine.state.name}): $chunks chunks in 10 s, '
+        'peak ${(peak * 100).toStringAsFixed(1)}%',
+      );
+    }
     if (chunks == 0) {
-      _log('no audio for 30 s: the microphone stream stopped', error: true);
+      await _restartMic('no audio for 10 s');
       return;
     }
-    if (peak > 0) {
-      _silentReports = 0;
+    if (peak > 0 || engine.state != EngineState.idle) {
+      _silentChecks = 0;
       return;
     }
-    if (++_silentReports >= 2 && !_warnedMuted) {
+    _silentChecks++;
+    if (_silentChecks == 2 &&
+        DateTime.now().difference(_lastRestart) > const Duration(minutes: 2)) {
+      await _restartMic(
+        'pure silence for 20 s (app ${open ? 'open' : 'in background'})',
+      );
+    } else if (_silentChecks >= 6 && !_warnedMuted) {
       _warnedMuted = true;
       _log(
-        'the microphone is delivering pure silence (app '
-        '${open ? 'open' : 'in background'}): the phone is blocking it',
+        'the microphone is still delivering pure silence after a restart: '
+        'the phone is blocking it',
         error: true,
       );
       FlutterForegroundTask.updateService(
         notificationTitle: 'Hey Notes can’t hear you',
-        notificationText:
-            'The phone muted the microphone. Open the app to fix.',
+        notificationText: 'Open the app to turn listening back on.',
       );
+    }
+  }
+
+  /// Stops and reopens the microphone stream. Clears a recorder stuck or
+  /// muted after a note (the "saved" beep, an audio route change...).
+  Future<void> _restartMic(String why) async {
+    if (_restartingMic) return;
+    _restartingMic = true;
+    _lastRestart = DateTime.now();
+    try {
+      final mic = _mic;
+      _mic = null;
+      if (mic != null) {
+        await mic.cancel();
+        await _recorder.stop();
+      }
+      await _syncMic();
+      _log('microphone restarted ($why)');
+    } catch (e) {
+      _log('microphone restart failed ($why): $e', error: true);
+    } finally {
+      _restartingMic = false;
     }
   }
 
@@ -315,7 +357,11 @@ class VoiceTaskHandler extends TaskHandler {
       _lastEngine = 'streaming';
       throw StateError('Whisper is not downloaded');
     }
-    final text = await worker.transcribe(segments, VoiceEngine.sampleRate);
+    // Never let a stuck worker leave the engine "transcribing" (deaf to
+    // the wake word) forever.
+    final text = await worker
+        .transcribe(segments, VoiceEngine.sampleRate)
+        .timeout(const Duration(seconds: 30));
     _lastEngine = 'Whisper';
     _log(
       'Whisper: $secs s of speech in ${worker.lastDuration.inMilliseconds} ms '
@@ -363,7 +409,13 @@ class VoiceTaskHandler extends TaskHandler {
       _mic = stream.listen(
         _onPcm,
         onError: (Object e) => _log('mic stream error: $e', error: true),
-        onDone: () => _log('mic stream ended'),
+        onDone: () {
+          // Ended without us stopping it: the watchdog reopens it.
+          if (_mic != null && !_restartingMic) {
+            _log('mic stream ended unexpectedly', error: true);
+            _mic = null;
+          }
+        },
       );
       _log('microphone on');
     } else if (!need && _mic != null) {
@@ -518,7 +570,7 @@ class VoiceTaskHandler extends TaskHandler {
       _finishOverlay(_userCancelled ? null : ho.OverlayState.nothing);
       _userCancelled = false;
       _updateNotification();
-      await _syncMic().catchError(_micFailed);
+      await _restartMic('after capture');
       await _stopIfUnneeded();
       return;
     }
@@ -568,7 +620,7 @@ class VoiceTaskHandler extends TaskHandler {
         'message': 'Could not save note: $e',
       });
     }
-    await _syncMic().catchError(_micFailed);
+    await _restartMic('after note');
     await _stopIfUnneeded();
   }
 

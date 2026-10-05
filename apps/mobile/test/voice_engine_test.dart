@@ -78,6 +78,29 @@ void main() {
     expect(run.result!.usedWhisper, isFalse);
   });
 
+  test('wakes again for a second note right after the first', () {
+    final a = so.readWave('test/fixtures/hey_notes_shopping.wav').samples;
+    final audio = Float32List(a.length * 2)
+      ..setAll(0, a)
+      ..setAll(a.length, a);
+    final engine = VoiceEngine(paths)..init(loadWhisper: false);
+    final wakes = <bool>[];
+    final notes = <String?>[];
+    engine.onState = (s, {byWake = false}) {
+      if (s == EngineState.capturing) wakes.add(byWake);
+    };
+    engine.onDone = (r) => notes.add(r?.text);
+    for (var i = 0; i < audio.length; i += 1600) {
+      engine.accept(
+        Float32List.sublistView(audio, i, (i + 1600).clamp(0, audio.length)),
+      );
+    }
+    engine.dispose();
+    expect(wakes, [true, true]);
+    expect(notes, hasLength(2));
+    expect(notes.every((n) => n != null && n.contains('home')), isTrue);
+  });
+
   test('speech without the wake word is ignored', () {
     final run = feed('test/fixtures/no_wake_word.wav');
     expect(run.states, isEmpty);

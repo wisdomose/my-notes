@@ -65,8 +65,8 @@ class VoiceController extends ChangeNotifier {
       ),
       iosNotificationOptions: const IOSNotificationOptions(),
       foregroundTaskOptions: ForegroundTaskOptions(
-        // Mic health report every 30 s (VoiceTaskHandler.onRepeatEvent).
-        eventAction: ForegroundTaskEventAction.repeat(30000),
+        // Mic watchdog every 10 s (VoiceTaskHandler.onRepeatEvent).
+        eventAction: ForegroundTaskEventAction.repeat(10000),
         allowWakeLock: true,
         allowAutoRestart: true,
       ),

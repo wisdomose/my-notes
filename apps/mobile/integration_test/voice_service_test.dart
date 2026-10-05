@@ -68,6 +68,36 @@ void main() {
       'the capture to end',
     );
 
+    // A second note right away (the bug: the wake word went deaf after
+    // a note until the app was reopened). The mic restarts after each
+    // capture and must deliver audio again.
+    await pumpUntil(
+      tester,
+      () => voice.log.any((l) => l.contains('microphone restarted (after')),
+      const Duration(seconds: 15),
+      'the microphone to restart after the note',
+    );
+    expect(await voice.startCapture(), isTrue);
+    await pumpUntil(
+      tester,
+      () => voice.state == EngineState.capturing,
+      const Duration(seconds: 20),
+      'the second capture to start',
+    );
+    final levelsBefore = voice.levels.where((l) => l > 0).length;
+    await pumpUntil(
+      tester,
+      () => voice.state == EngineState.idle,
+      const Duration(seconds: 30),
+      'the second capture to end',
+    );
+    expect(
+      voice.log.where((l) => l.contains('capture started')).length,
+      greaterThanOrEqualTo(2),
+    );
+    // ignore: avoid_print
+    print('levels seen in 2nd capture: $levelsBefore');
+
     // ignore: avoid_print
     print('--- app log ---\n${voice.log.join('\n')}');
   });
