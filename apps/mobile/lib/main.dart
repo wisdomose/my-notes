@@ -3,9 +3,11 @@ import 'package:flutter/services.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 
 import 'data/notes_db.dart';
+import 'data/reminders.dart';
 import 'data/settings.dart';
 import 'theme.dart';
 import 'ui/home_screen.dart';
+import 'ui/note_screen.dart';
 import 'voice/model_files.dart';
 import 'voice/voice_controller.dart';
 import 'voice/model_download.dart';
@@ -38,6 +40,17 @@ class Services {
 
 Services get services => Services.instance;
 
+final navigatorKey = GlobalKey<NavigatorState>();
+
+/// A tapped reminder opens its note.
+Future<void> openNote(int id) async {
+  final note = await services.db.get(id);
+  if (note == null) return;
+  await navigatorKey.currentState?.push(
+    MaterialPageRoute<void>(builder: (_) => NoteScreen(note: note)),
+  );
+}
+
 Future<void> main() async {
   WidgetsFlutterBinding.ensureInitialized();
   FlutterForegroundTask.initCommunicationPort();
@@ -50,7 +63,12 @@ Future<void> main() async {
     ),
   );
   await Services.init();
+  await Reminders.init(onTap: openNote);
   runApp(const HeyNotesApp());
+  final launchedBy = await Reminders.launchedFrom();
+  if (launchedBy != null) {
+    WidgetsBinding.instance.addPostFrameCallback((_) => openNote(launchedBy));
+  }
 }
 
 class HeyNotesApp extends StatelessWidget {
@@ -61,6 +79,7 @@ class HeyNotesApp extends StatelessWidget {
     return WithForegroundTask(
       child: MaterialApp(
         title: 'Hey Notes',
+        navigatorKey: navigatorKey,
         debugShowCheckedModeBanner: false,
         theme: buildTheme(),
         home: const HomeScreen(),

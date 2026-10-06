@@ -6,6 +6,7 @@ import 'package:hey_overlay/hey_overlay.dart';
 import '../data/note.dart';
 import '../main.dart';
 import '../theme.dart';
+import '../util/reminder_time.dart';
 import '../util/text.dart';
 import '../voice/voice_controller.dart';
 import '../voice/voice_engine.dart';
@@ -610,6 +611,13 @@ class _NoteCard extends StatelessWidget {
                       'Voice · ${formatDuration(note.durationMs)}',
                       style: mono(12),
                     ),
+                    if (note.remindAt?.isAfter(DateTime.now()) ?? false) ...[
+                      const SizedBox(width: 8),
+                      Text(
+                        '⏰ ${formatReminder(note.remindAt!)}',
+                        style: mono(12, color: C.accent),
+                      ),
+                    ],
                     for (final t in note.tags.take(3)) ...[
                       const SizedBox(width: 8),
                       Text('#$t', style: mono(12, color: C.accent)),

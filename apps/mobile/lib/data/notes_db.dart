@@ -4,6 +4,7 @@ import 'package:path/path.dart' as p;
 import 'package:sqflite/sqflite.dart';
 
 import 'note.dart';
+import 'reminders.dart';
 
 /// Local SQLite store. Opened by both the UI and the background voice service.
 class NotesDb {
@@ -15,7 +16,7 @@ class NotesDb {
     final dir = await getDatabasesPath();
     final db = await openDatabase(
       p.join(dir, 'notes.db'),
-      version: 4,
+      version: 5,
       onCreate: (db, _) => db.execute('''
         CREATE TABLE notes (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -28,7 +29,8 @@ class NotesDb {
           error TEXT,
           transcript TEXT,
           tidy_error TEXT,
-          tags TEXT NOT NULL DEFAULT ''
+          tags TEXT NOT NULL DEFAULT '',
+          remind_at INTEGER
         )
       '''),
       onUpgrade: (db, from, _) async {
@@ -46,6 +48,10 @@ class NotesDb {
           await db.execute(
             "ALTER TABLE notes ADD COLUMN tags TEXT NOT NULL DEFAULT ''",
           );
+        }
+        // v5: reminders ("remind me tomorrow at 9").
+        if (from < 5) {
+          await db.execute('ALTER TABLE notes ADD COLUMN remind_at INTEGER');
         }
       },
     );
@@ -65,6 +71,7 @@ class NotesDb {
   Future<void> delete(int id) async {
     final note = await get(id);
     await _db.delete('notes', where: 'id = ?', whereArgs: [id]);
+    if (note?.remindAt != null) await Reminders.cancel(id);
     final audio = note?.audioPath;
     if (audio != null) {
       final f = File(audio);

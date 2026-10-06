@@ -61,11 +61,14 @@ class CloudTranscriber {
   }
 
   /// Tidies a transcript (`POST /v1/tidy`): a title and cleaned-up text.
-  Future<({String title, String text})> tidy(String transcript) async {
+  /// With [now] (the phone's clock, see `localNow`) it also works out the
+  /// time of a "remind me …" note: [reminder.at] is ISO 8601, unchecked.
+  Future<({String title, String text, ({String at, String what})? reminder})>
+  tidy(String transcript, {String? now}) async {
     final res = await _client.post(
       Uri.parse('$_base/v1/tidy'),
       headers: {'Content-Type': 'application/json'},
-      body: jsonEncode({'text': transcript}),
+      body: jsonEncode({'text': transcript, 'now': ?now}),
     );
     Map<String, Object?> body;
     try {
@@ -82,7 +85,11 @@ class CloudTranscriber {
     if (title is! String || text is! String || text.trim().isEmpty) {
       throw CloudError('unexpected response');
     }
-    return (title: title, text: text);
+    final r = body['reminder'];
+    final reminder = r is Map && r['at'] is String && r['what'] is String
+        ? (at: r['at'] as String, what: r['what'] as String)
+        : null;
+    return (title: title, text: text, reminder: reminder);
   }
 
   void close() => _client.close();

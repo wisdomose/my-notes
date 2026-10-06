@@ -13,10 +13,12 @@ import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
 
 import '../data/note.dart';
 import '../data/notes_db.dart';
+import '../data/reminders.dart';
 import '../data/settings.dart';
 import '../util/commands.dart';
 import '../util/log_file.dart';
 import '../util/memory.dart';
+import '../util/reminder_time.dart';
 import '../util/text.dart';
 import 'cloud.dart';
 import 'model_files.dart';
@@ -439,20 +441,56 @@ class VoiceTaskHandler extends TaskHandler {
     }
   }
 
-  /// Tidies a transcript when the setting is on. Returns null when off;
-  /// on failure, the raw text with [error] set (never silently).
-  Future<({String? title, String? text, String? error})?> _tidyText(
-    String raw,
-  ) async {
-    if (!_settings.tidyEnabled) return null;
+  /// Tidies a transcript when the setting is on (or [force]), and works
+  /// out the time of a "remind me …" note ([remind]) even when it's off.
+  /// Returns null when there's nothing to do; on failure, [error] is set
+  /// and the raw text is kept (never silently).
+  Future<_Tidied?> _tidyText(
+    String raw, {
+    bool remind = false,
+    bool force = false,
+  }) async {
+    final tidy = force || _settings.tidyEnabled;
+    if (!tidy && !remind) return null;
     final sw = Stopwatch()..start();
     try {
-      final t = await _cloud.tidy(raw).timeout(const Duration(seconds: 30));
+      final now = DateTime.now();
+      final t = await _cloud
+          .tidy(raw, now: remind ? localNow(now) : null)
+          .timeout(const Duration(seconds: 30));
       _log('tidied in ${sw.elapsedMilliseconds} ms');
-      return (title: t.title, text: t.text, error: null);
+      final at = remind && t.reminder != null
+          ? checkReminderAt(t.reminder!.at, now)
+          : null;
+      if (remind) _log('reminder: ${t.reminder?.at} -> $at');
+      return (
+        title: tidy ? t.title : null,
+        text: tidy ? t.text : null,
+        error: remind && at == null ? reminderUnclear : null,
+        remindAt: at,
+        what: at == null ? null : t.reminder!.what,
+      );
     } catch (e) {
       _log('tidy failed after ${sw.elapsedMilliseconds} ms: $e', error: true);
-      return (title: null, text: null, error: _tidyReason(e));
+      return (
+        title: null,
+        text: null,
+        error: _tidyReason(e),
+        remindAt: null,
+        what: null,
+      );
+    }
+  }
+
+  /// Schedules [note]'s reminder (if it has one) under its id.
+  Future<void> _scheduleReminder(int id, _Tidied? t) async {
+    final at = t?.remindAt;
+    if (at == null) return;
+    try {
+      final exact = await Reminders.schedule(id, at, t!.what ?? 'Reminder');
+      _log('reminder for note $id at $at${exact ? '' : ' (inexact)'}');
+    } catch (e) {
+      _log('could not schedule reminder for note $id: $e', error: true);
     }
   }
 
@@ -472,22 +510,30 @@ class VoiceTaskHandler extends TaskHandler {
       error = 'The note is gone';
     } else {
       final raw = note.transcript ?? note.body;
-      try {
-        final t = await _cloud.tidy(raw).timeout(const Duration(seconds: 30));
-        await _db.update(
-          note.copyWith(
-            title: t.title,
-            body: t.text,
-            transcript: () => t.text != raw ? raw : null,
-            tidyError: () => null,
-          ),
-        );
-        _log('retry tidy succeeded for note $id');
-      } catch (e) {
-        error = _tidyReason(e);
-        await _db.update(note.copyWith(tidyError: () => error));
-        _log('retry tidy failed for note $id: $e', error: true);
-      }
+      final remind = parseCommands(raw).remind;
+      final t = (await _tidyText(raw, remind: remind, force: !remind))!;
+      error = t.error;
+      final text = t.text;
+      await _db.update(
+        note.copyWith(
+          title: t.title,
+          body: text == null
+              ? null
+              : note.body.contains('- [ ] ') || note.body.contains('- [x] ')
+              ? toChecklist(text)
+              : text,
+          transcript: text == null ? null : () => text != raw ? raw : null,
+          tidyError: () => error,
+          remindAt: t.remindAt == null ? null : () => t.remindAt,
+        ),
+      );
+      await _scheduleReminder(id, t);
+      _log(
+        error == null
+            ? 'retry tidy succeeded for note $id'
+            : 'retry tidy failed for note $id: $error',
+        error: error != null,
+      );
     }
     FlutterForegroundTask.sendDataToMain({
       'type': Msg.retried,
@@ -538,14 +584,20 @@ class VoiceTaskHandler extends TaskHandler {
       if (text.isEmpty) {
         error = 'Nothing to transcribe in this recording';
       } else {
-        final tidied = await _tidyText(text);
+        final cmds = parseCommands(text);
+        final spoken = cmds.text.isNotEmpty ? cmds.text : text;
+        final tidied = await _tidyText(spoken, remind: cmds.remind);
+        var body = tidied?.text ?? spoken;
+        if (cmds.checklist) body = toChecklist(body);
         var updated = note.copyWith(
-          title: tidied?.title ?? makeTitle(text),
-          body: tidied?.text ?? text,
+          title: tidied?.title ?? makeTitle(spoken),
+          body: body,
           error: () => null,
           transcript: () =>
-              tidied?.text != null && tidied!.text != text ? text : null,
+              tidied?.text != null && tidied!.text != spoken ? text : null,
           tidyError: () => tidied?.error,
+          tags: {...note.tags, ...cmds.tags}.toList(),
+          remindAt: () => tidied?.remindAt,
         );
         // The recording was only kept so the note could be retried.
         if (!_settings.keepAudio) {
@@ -553,6 +605,7 @@ class VoiceTaskHandler extends TaskHandler {
           await File(audio).delete().catchError((_) => File(audio));
         }
         await _db.update(updated);
+        await _scheduleReminder(id, tidied);
         _log('retry succeeded for note $id');
       }
     } on TranscriptionError catch (e) {
@@ -784,7 +837,9 @@ class VoiceTaskHandler extends TaskHandler {
           'commands: ${[if (cmds.append) 'append', if (cmds.checklist) 'checklist', if (cmds.remind) 'remind', ...cmds.tags.map((t) => 'tag:$t')].join(', ')}',
         );
       }
-      final tidied = failed == null ? await _tidyText(spoken) : null;
+      final tidied = failed == null
+          ? await _tidyText(spoken, remind: cmds!.remind)
+          : null;
       var body = tidied?.text ?? spoken;
       if (cmds?.checklist ?? false) body = toChecklist(body);
       final last = (cmds?.append ?? false) ? await _db.latest() : null;
@@ -798,6 +853,8 @@ class VoiceTaskHandler extends TaskHandler {
               ? null
               : '${last.transcript ?? last.body}\n\n$spoken',
           tags: {...last.tags, ...cmds!.tags}.toList(),
+          tidyError: tidied?.error == null ? null : () => tidied!.error,
+          remindAt: tidied?.remindAt == null ? null : () => tidied!.remindAt,
         );
         await _db.update(note);
         id = last.id!;
@@ -821,9 +878,11 @@ class VoiceTaskHandler extends TaskHandler {
               : null,
           tidyError: tidied?.error,
           tags: cmds?.tags ?? const [],
+          remindAt: tidied?.remindAt,
         );
         id = await _db.insert(note);
       }
+      await _scheduleReminder(id, tidied);
       if (failed != null) {
         _log(
           'note $id saved NOT transcribed (${result.durationMs ~/ 1000} s): '
@@ -911,3 +970,11 @@ class VoiceTaskHandler extends TaskHandler {
     _engine = null;
   }
 }
+
+typedef _Tidied = ({
+  String? title,
+  String? text,
+  String? error,
+  DateTime? remindAt,
+  String? what,
+});

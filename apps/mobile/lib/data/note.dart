@@ -11,6 +11,7 @@ class Note {
     this.transcript,
     this.tidyError,
     this.tags = const [],
+    this.remindAt,
   });
 
   final int? id;
@@ -39,6 +40,9 @@ class Note {
   /// Lower-case tags ("tag it work").
   final List<String> tags;
 
+  /// When the note's reminder fires ("remind me tomorrow at 9 …").
+  final DateTime? remindAt;
+
   Note copyWith({
     String? title,
     String? body,
@@ -47,6 +51,7 @@ class Note {
     String? Function()? transcript,
     String? Function()? tidyError,
     List<String>? tags,
+    DateTime? Function()? remindAt,
   }) => Note(
     id: id,
     title: title ?? this.title,
@@ -59,6 +64,7 @@ class Note {
     transcript: transcript == null ? this.transcript : transcript(),
     tidyError: tidyError == null ? this.tidyError : tidyError(),
     tags: tags ?? this.tags,
+    remindAt: remindAt == null ? this.remindAt : remindAt(),
   );
 
   /// The same note with its recording reference dropped.
@@ -73,6 +79,7 @@ class Note {
     transcript: transcript,
     tidyError: tidyError,
     tags: tags,
+    remindAt: remindAt,
   );
 
   Map<String, Object?> toMap() => {
@@ -87,6 +94,7 @@ class Note {
     'transcript': transcript,
     'tidy_error': tidyError,
     'tags': tags.join(','),
+    'remind_at': remindAt?.millisecondsSinceEpoch,
   };
 
   factory Note.fromMap(Map<String, Object?> m) => Note(
@@ -104,5 +112,9 @@ class Note {
         .split(',')
         .where((t) => t.isNotEmpty)
         .toList(),
+    remindAt: switch (m['remind_at']) {
+      final int ms => DateTime.fromMillisecondsSinceEpoch(ms),
+      _ => null,
+    },
   );
 }

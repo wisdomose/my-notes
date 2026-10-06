@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter_foreground_task/flutter_foreground_task.dart';
 import 'package:hey_overlay/hey_overlay.dart';
 
+import '../data/reminders.dart';
 import '../data/settings.dart';
 import '../main.dart';
 import '../theme.dart';
@@ -23,6 +24,7 @@ class _SettingsScreenState extends State<SettingsScreen>
   AppSettings get _s => services.settings;
   bool? _batteryOk;
   bool? _canDrawOverlay;
+  bool? _exactReminders;
 
   @override
   void initState() {
@@ -51,7 +53,13 @@ class _SettingsScreenState extends State<SettingsScreen>
   Future<void> _checkSystem() async {
     await _checkBattery();
     final draw = await HeyOverlay.canDraw();
-    if (mounted) setState(() => _canDrawOverlay = draw);
+    final exact = await Reminders.exactAllowed();
+    if (mounted) {
+      setState(() {
+        _canDrawOverlay = draw;
+        _exactReminders = exact;
+      });
+    }
   }
 
   Future<void> _changed() async {
@@ -162,6 +170,8 @@ class _SettingsScreenState extends State<SettingsScreen>
                 _s.tidyEnabled = v;
                 _changed();
               }),
+              if (_exactReminders == false)
+                _linkRow('Allow reminders on time', Reminders.requestExact),
             ]),
             const SizedBox(height: 18),
             _group([

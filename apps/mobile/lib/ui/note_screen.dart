@@ -8,8 +8,10 @@ import 'package:flutter/services.dart';
 import 'package:share_plus/share_plus.dart';
 
 import '../data/note.dart';
+import '../data/reminders.dart';
 import '../main.dart';
 import '../theme.dart';
+import '../util/reminder_time.dart';
 import '../util/text.dart';
 import 'widgets.dart';
 
@@ -219,6 +221,7 @@ class _NoteScreenState extends State<NoteScreen> {
                     else if (_note.failed)
                       _failedPanel()
                     else ...[
+                      if (_note.remindAt != null) _reminderBar(),
                       if (_note.tags.isNotEmpty) ...[
                         Wrap(
                           spacing: 8,
@@ -348,6 +351,39 @@ class _NoteScreenState extends State<NoteScreen> {
     await services.db.update(updated);
   }
 
+  /// "⏰ Tue 7 Oct, 09:00" with a way to cancel it.
+  Widget _reminderBar() {
+    final at = _note.remindAt!;
+    final past = !at.isAfter(DateTime.now());
+    return Padding(
+      padding: const EdgeInsets.only(bottom: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              '⏰ ${formatReminder(at)}',
+              style: sans(15, weight: 500, color: past ? C.muted : C.accent),
+            ),
+          ),
+          if (!past)
+            TextButton(
+              onPressed: () async {
+                await Reminders.cancel(_note.id!);
+                final updated = _note.copyWith(remindAt: () => null);
+                await services.db.update(updated);
+                if (mounted) setState(() => _note = updated);
+              },
+              style: TextButton.styleFrom(minimumSize: const Size(44, 44)),
+              child: Text(
+                'Cancel',
+                style: sans(15, weight: 600, color: C.muted),
+              ),
+            ),
+        ],
+      ),
+    );
+  }
+
   /// Tidying failed: the note shows the raw transcript; offer a retry.
   Widget _tidyFailedBar() {
     final busy = services.voice.retrying.contains(_note.id);
@@ -357,7 +393,9 @@ class _NoteScreenState extends State<NoteScreen> {
         children: [
           Expanded(
             child: Text(
-              'Not tidied up · ${_note.tidyError}',
+              _note.tidyError == reminderUnclear
+                  ? reminderUnclear
+                  : 'Not tidied up · ${_note.tidyError}',
               style: sans(14, color: C.muted),
             ),
           ),
