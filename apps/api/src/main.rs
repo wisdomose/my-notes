@@ -3,6 +3,7 @@ use std::sync::Arc;
 
 use hey_notes_api::intron::Intron;
 use hey_notes_api::rate_limit::RateLimiter;
+use hey_notes_api::tidy::Tidier;
 use hey_notes_api::{AppState, app};
 use tracing_subscriber::EnvFilter;
 
@@ -12,6 +13,7 @@ use tracing_subscriber::EnvFilter;
 /// - `RATE_LIMIT_PER_MINUTE` (default 10): per client IP
 /// - `TRUST_PROXY` (default true): read client IPs from X-Forwarded-For
 /// - `INTRON_BASE_URL` (default https://infer.voice.intron.io)
+/// - `OPENAI_API_KEY`: enables `/v1/tidy`; `OPENAI_MODEL` (default gpt-6-luna)
 #[tokio::main]
 async fn main() {
     let _ = dotenvy::dotenv();
@@ -35,7 +37,21 @@ async fn main() {
         ),
         limiter: Arc::new(RateLimiter::new(env_or("RATE_LIMIT_PER_MINUTE", 10))),
         trust_proxy: env_or("TRUST_PROXY", true),
+        tidier: std::env::var("OPENAI_API_KEY")
+            .ok()
+            .filter(|k| !k.trim().is_empty())
+            .map(|key| {
+                Tidier::new(
+                    std::env::var("OPENAI_BASE_URL")
+                        .unwrap_or_else(|_| "https://api.openai.com".into()),
+                    key.trim().to_string(),
+                    std::env::var("OPENAI_MODEL").unwrap_or_else(|_| "gpt-6-luna".into()),
+                )
+            }),
     };
+    if state.tidier.is_none() {
+        tracing::warn!("OPENAI_API_KEY not set: /v1/tidy is disabled");
+    }
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     let listener = tokio::net::TcpListener::bind(addr).await.expect("bind");

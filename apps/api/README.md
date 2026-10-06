@@ -22,6 +22,12 @@ Errors are `{"error": "..."}`: 400 bad input, 413 too large, 422 rejected by
 Intron (e.g. over 120 s), 429 rate limited (with `Retry-After`), 502/504
 upstream failure or timeout.
 
+`POST /v1/tidy` (open, same per-IP limit), JSON `{"text": "<transcript>"}` →
+`{"title", "text"}`: a short title and the cleaned-up note (punctuation,
+fillers removed, the speaker's corrections applied, lists as bullets). Runs
+on OpenAI `gpt-6-luna` with a strict JSON schema; titles are put into
+sentence case in code. 503 when `OPENAI_API_KEY` isn't set.
+
 `GET /health` → `{"ok": true}`
 
 Intron's sync endpoint is used; if it times out it returns a file id, which the
@@ -38,6 +44,8 @@ Environment variables (or a git-ignored `.env`, see `.env.example`):
 | `RATE_LIMIT_PER_MINUTE` | 10 | per client IP |
 | `TRUST_PROXY` | true in Docker | read the client IP from `X-Forwarded-For` |
 | `INTRON_BASE_URL` | `https://infer.voice.intron.io` | |
+| `OPENAI_API_KEY` | unset | enables `/v1/tidy`; never commit it |
+| `OPENAI_MODEL` | `gpt-6-luna` | e.g. `gpt-6.1-sol` |
 
 The route is open: anyone with the URL can spend Intron credits, up to the
 per-IP limit. Intron itself allows 30 requests a minute per key.

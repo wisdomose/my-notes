@@ -12,6 +12,7 @@
 pub mod cloudflare;
 pub mod intron;
 pub mod rate_limit;
+pub mod tidy;
 
 use std::net::{IpAddr, SocketAddr};
 use std::sync::Arc;
@@ -26,6 +27,7 @@ use tower_http::trace::TraceLayer;
 
 use intron::{Intron, IntronError};
 use rate_limit::RateLimiter;
+use tidy::{Tidier, TidyError};
 
 /// Generous for 120 s of 16 kHz mono WAV (~3.8 MB) or any compressed format.
 pub const MAX_UPLOAD_BYTES: usize = 15 * 1024 * 1024;
@@ -37,12 +39,15 @@ pub struct AppState {
     /// Behind a reverse proxy (Coolify/Traefik): take the client IP from the
     /// last `X-Forwarded-For` entry, the one our proxy appended.
     pub trust_proxy: bool,
+    /// Note tidying (titles + cleanup); None when no OpenAI key is set.
+    pub tidier: Option<Tidier>,
 }
 
 pub fn app(state: AppState) -> Router {
     Router::new()
         .route("/health", get(|| async { Json(json!({ "ok": true })) }))
         .route("/v1/transcribe", post(transcribe))
+        .route("/v1/tidy", post(tidy_note))
         .layer(DefaultBodyLimit::max(MAX_UPLOAD_BYTES))
         .layer(TraceLayer::new_for_http())
         .with_state(state)
@@ -123,6 +128,60 @@ async fn transcribe(
                 IntronError::Upstream(_) => {
                     error(StatusCode::BAD_GATEWAY, "The speech service failed")
                 }
+            }
+        }
+    }
+}
+
+#[derive(serde::Deserialize)]
+struct TidyRequest {
+    text: String,
+}
+
+/// `POST /v1/tidy` `{"text": "<transcript>"}` → `{"title", "text"}`.
+async fn tidy_note(
+    State(state): State<AppState>,
+    ConnectInfo(peer): ConnectInfo<SocketAddr>,
+    headers: HeaderMap,
+    body: Result<Json<TidyRequest>, axum::extract::rejection::JsonRejection>,
+) -> Response {
+    let ip = client_ip(&headers, peer, state.trust_proxy);
+    if let Err(retry_after) = state.limiter.check(ip) {
+        let mut res = error(
+            StatusCode::TOO_MANY_REQUESTS,
+            "Too many requests, slow down",
+        );
+        if let Ok(v) = HeaderValue::from_str(&retry_after.to_string()) {
+            res.headers_mut().insert(header::RETRY_AFTER, v);
+        }
+        return res;
+    }
+    let Some(tidier) = state.tidier.as_ref() else {
+        return error(StatusCode::SERVICE_UNAVAILABLE, "Tidying isn't configured");
+    };
+    let Ok(Json(req)) = body else {
+        return error(StatusCode::BAD_REQUEST, "Send JSON: {\"text\": \"...\"}");
+    };
+    let text = req.text.trim();
+    if text.is_empty() || text.chars().count() > 20_000 {
+        return error(
+            StatusCode::BAD_REQUEST,
+            "Text must be 1 to 20,000 characters",
+        );
+    }
+    match tidier.tidy(text).await {
+        Ok(t) => {
+            tracing::info!(%ip, chars = text.len(), "tidied");
+            Json(t).into_response()
+        }
+        Err(e) => {
+            tracing::warn!(%ip, error = ?e, "tidy failed");
+            match e {
+                TidyError::RateLimited => error(
+                    StatusCode::TOO_MANY_REQUESTS,
+                    "The AI service is busy, try again in a minute",
+                ),
+                TidyError::Upstream(_) => error(StatusCode::BAD_GATEWAY, "Tidying failed"),
             }
         }
     }

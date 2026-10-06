@@ -107,6 +107,7 @@ async fn start(per_minute: usize) -> (String, Fake) {
         intron: Intron::new(format!("http://{intron}"), "test-key".into()),
         limiter: Arc::new(RateLimiter::new(per_minute)),
         trust_proxy: false,
+        tidier: None,
     }))
     .await;
     (format!("http://{api}"), fake)
