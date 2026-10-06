@@ -158,6 +158,13 @@ class _SettingsScreenState extends State<SettingsScreen>
             ]),
             const SizedBox(height: 18),
             _group([
+              _switchRow('Tidy up notes', _s.tidyEnabled, (v) {
+                _s.tidyEnabled = v;
+                _changed();
+              }),
+            ]),
+            const SizedBox(height: 18),
+            _group([
               _linkRow(
                 'Diagnostics',
                 () => Navigator.of(context).push(

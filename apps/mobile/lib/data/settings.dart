@@ -13,6 +13,7 @@ class AppSettings {
     this.keepAudio = false,
     this.overlayEnabled = true,
     this.engine = engineCloud,
+    this.tidyEnabled = true,
   });
 
   bool wakeEnabled;
@@ -32,6 +33,9 @@ class AppSettings {
   /// Hey Notes API; falls back to on-device), [engineDevice] (Whisper) or
   /// [engineParakeet].
   String engine;
+
+  /// Tidy notes up (title, cleanup, lists) with AI through the API.
+  bool tidyEnabled;
   static const engineCloud = 'cloud';
   static const engineDevice = 'device';
   static const engineParakeet = 'parakeet';
@@ -61,6 +65,7 @@ class AppSettings {
       keepAudio: await p.getBool('keepAudio') ?? false,
       overlayEnabled: await p.getBool('overlayEnabled') ?? true,
       engine: await p.getString('engine') ?? engineCloud,
+      tidyEnabled: await p.getBool('tidyEnabled') ?? true,
     );
   }
 
@@ -73,6 +78,7 @@ class AppSettings {
     await p.setBool('keepAudio', keepAudio);
     await p.setBool('overlayEnabled', overlayEnabled);
     await p.setString('engine', engine);
+    await p.setBool('tidyEnabled', tidyEnabled);
   }
 
   String get sensitivityLabel => sensitivity < 34

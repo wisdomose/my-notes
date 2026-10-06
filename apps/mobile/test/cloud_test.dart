@@ -81,6 +81,26 @@ void main() {
       expect(seen[2], contains('RIFF'));
     });
 
+    test('tidy posts JSON and returns title and text', () async {
+      reply = (
+        200,
+        '{"title":"Call Peter about the car","text":"Call Peter."}',
+      );
+      final t = await client().tidy('call call John no wait call Peter');
+      expect(t.title, 'Call Peter about the car');
+      expect(t.text, 'Call Peter.');
+      expect(seen[0], 'POST /v1/tidy');
+      expect(seen[1], 'application/json');
+      expect(jsonDecode(seen[2]), {
+        'text': 'call call John no wait call Peter',
+      });
+    });
+
+    test('tidy errors become CloudError', () async {
+      reply = (503, '{"error":"Tidying isn\u0027t configured"}');
+      await expectLater(client().tidy('x'), throwsA(isA<CloudError>()));
+    });
+
     test('turns API errors into CloudError', () async {
       reply = (429, '{"error":"Too many requests, slow down"}');
       await expectLater(

@@ -60,6 +60,31 @@ class CloudTranscriber {
     return text;
   }
 
+  /// Tidies a transcript (`POST /v1/tidy`): a title and cleaned-up text.
+  Future<({String title, String text})> tidy(String transcript) async {
+    final res = await _client.post(
+      Uri.parse('$_base/v1/tidy'),
+      headers: {'Content-Type': 'application/json'},
+      body: jsonEncode({'text': transcript}),
+    );
+    Map<String, Object?> body;
+    try {
+      body = jsonDecode(res.body) as Map<String, Object?>;
+    } catch (_) {
+      body = const {};
+    }
+    if (res.statusCode != 200) {
+      throw CloudError(
+        'HTTP ${res.statusCode}: ${body['error'] ?? 'request failed'}',
+      );
+    }
+    final title = body['title'], text = body['text'];
+    if (title is! String || text is! String || text.trim().isEmpty) {
+      throw CloudError('unexpected response');
+    }
+    return (title: title, text: text);
+  }
+
   void close() => _client.close();
 
   static Float32List joinSegments(List<Float32List> segments, int rate) {

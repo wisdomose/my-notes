@@ -30,6 +30,9 @@ class _NoteScreenState extends State<NoteScreen> {
   late final _body = TextEditingController(text: _note.body);
   final _player = AudioPlayer();
   bool _playing = false;
+
+  /// Showing the words as transcribed instead of the tidied note.
+  bool _showOriginal = false;
   double _progress = 0;
   final List<StreamSubscription<dynamic>> _subs = [];
 
@@ -215,8 +218,33 @@ class _NoteScreenState extends State<NoteScreen> {
                       )
                     else if (_note.failed)
                       _failedPanel()
-                    else
-                      SelectableText(_note.body, style: sans(18, height: 1.6)),
+                    else ...[
+                      SelectableText(
+                        _showOriginal ? _note.transcript! : _note.body,
+                        style: sans(
+                          18,
+                          height: 1.6,
+                          color: _showOriginal ? C.textSoft : C.text,
+                        ),
+                      ),
+                      if (_note.tidyError != null) _tidyFailedBar(),
+                      if (_note.transcript != null)
+                        Align(
+                          alignment: Alignment.centerLeft,
+                          child: TextButton(
+                            onPressed: () =>
+                                setState(() => _showOriginal = !_showOriginal),
+                            style: TextButton.styleFrom(
+                              minimumSize: const Size(44, 44),
+                              padding: EdgeInsets.zero,
+                            ),
+                            child: Text(
+                              _showOriginal ? 'Show tidied' : 'Show original',
+                              style: sans(14, weight: 500, color: C.accent),
+                            ),
+                          ),
+                        ),
+                    ],
                   ],
                 ),
               ),
@@ -224,6 +252,47 @@ class _NoteScreenState extends State<NoteScreen> {
             ],
           ),
         ),
+      ),
+    );
+  }
+
+  /// Tidying failed: the note shows the raw transcript; offer a retry.
+  Widget _tidyFailedBar() {
+    final busy = services.voice.retrying.contains(_note.id);
+    return Padding(
+      padding: const EdgeInsets.only(top: 16),
+      child: Row(
+        children: [
+          Expanded(
+            child: Text(
+              'Not tidied up · ${_note.tidyError}',
+              style: sans(14, color: C.muted),
+            ),
+          ),
+          busy
+              ? const Padding(
+                  padding: EdgeInsets.all(10),
+                  child: SizedBox(
+                    width: 20,
+                    height: 20,
+                    child: CircularProgressIndicator(
+                      strokeWidth: 2.5,
+                      color: C.accent,
+                    ),
+                  ),
+                )
+              : TextButton(
+                  onPressed: () async {
+                    await services.voice.retry(_note.id!, tidy: true);
+                    if (mounted) setState(() {});
+                  },
+                  style: TextButton.styleFrom(minimumSize: const Size(44, 44)),
+                  child: Text(
+                    'Retry',
+                    style: sans(15, weight: 600, color: C.accent),
+                  ),
+                ),
+        ],
       ),
     );
   }

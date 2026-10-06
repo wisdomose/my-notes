@@ -8,6 +8,8 @@ class Note {
     this.audioPath,
     this.source = 'voice',
     this.error,
+    this.transcript,
+    this.tidyError,
   });
 
   final int? id;
@@ -25,11 +27,21 @@ class Note {
   final String? error;
   bool get failed => error != null;
 
+  /// The words as transcribed, kept when the note was tidied up (title,
+  /// cleanup, lists) so the original is one tap away.
+  final String? transcript;
+
+  /// Set when tidying failed: the note shows the raw transcript and can be
+  /// retried.
+  final String? tidyError;
+
   Note copyWith({
     String? title,
     String? body,
     String? audioPath,
     String? Function()? error,
+    String? Function()? transcript,
+    String? Function()? tidyError,
   }) => Note(
     id: id,
     title: title ?? this.title,
@@ -39,6 +51,8 @@ class Note {
     audioPath: audioPath ?? this.audioPath,
     source: source,
     error: error == null ? this.error : error(),
+    transcript: transcript == null ? this.transcript : transcript(),
+    tidyError: tidyError == null ? this.tidyError : tidyError(),
   );
 
   /// The same note with its recording reference dropped.
@@ -50,6 +64,8 @@ class Note {
     durationMs: durationMs,
     source: source,
     error: error,
+    transcript: transcript,
+    tidyError: tidyError,
   );
 
   Map<String, Object?> toMap() => {
@@ -61,6 +77,8 @@ class Note {
     'audio_path': audioPath,
     'source': source,
     'error': error,
+    'transcript': transcript,
+    'tidy_error': tidyError,
   };
 
   factory Note.fromMap(Map<String, Object?> m) => Note(
@@ -72,5 +90,7 @@ class Note {
     audioPath: m['audio_path'] as String?,
     source: m['source'] as String? ?? 'voice',
     error: m['error'] as String?,
+    transcript: m['transcript'] as String?,
+    tidyError: m['tidy_error'] as String?,
   );
 }

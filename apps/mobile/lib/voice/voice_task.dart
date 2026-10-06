@@ -31,6 +31,7 @@ abstract final class Msg {
   static const reload = 'reload';
   static const ping = 'ping';
   static const retry = 'retry';
+  static const retryTidy = 'retryTidy';
 
   // service -> UI
   static const state = 'state';
@@ -49,6 +50,7 @@ abstract final class Msg {
 
   /// A note id to retry once the service has started.
   static const pendingRetryKey = 'pendingRetry';
+  static const pendingRetryTidyKey = 'pendingRetryTidy';
 }
 
 /// Entry point of the foreground service's isolate.
@@ -189,6 +191,13 @@ class VoiceTaskHandler extends TaskHandler {
         await FlutterForegroundTask.removeData(key: Msg.pendingRetryKey);
         _retry(pendingRetry);
       }
+      final pendingTidy = await FlutterForegroundTask.getData<int>(
+        key: Msg.pendingRetryTidyKey,
+      );
+      if (pendingTidy != null) {
+        await FlutterForegroundTask.removeData(key: Msg.pendingRetryTidyKey);
+        _retryTidy(pendingTidy);
+      }
       step = 'starting microphone';
       await _syncMic();
       _sendState();
@@ -311,6 +320,9 @@ class VoiceTaskHandler extends TaskHandler {
       case Msg.retry:
         final id = data['id'];
         if (id is int) _retry(id);
+      case Msg.retryTidy:
+        final id = data['id'];
+        if (id is int) _retryTidy(id);
       case Msg.ping:
         _sendState();
         _log(
@@ -426,6 +438,64 @@ class VoiceTaskHandler extends TaskHandler {
     }
   }
 
+  /// Tidies a transcript when the setting is on. Returns null when off;
+  /// on failure, the raw text with [error] set (never silently).
+  Future<({String? title, String? text, String? error})?> _tidyText(
+    String raw,
+  ) async {
+    if (!_settings.tidyEnabled) return null;
+    final sw = Stopwatch()..start();
+    try {
+      final t = await _cloud.tidy(raw).timeout(const Duration(seconds: 30));
+      _log('tidied in ${sw.elapsedMilliseconds} ms');
+      return (title: t.title, text: t.text, error: null);
+    } catch (e) {
+      _log('tidy failed after ${sw.elapsedMilliseconds} ms: $e', error: true);
+      return (title: null, text: null, error: _tidyReason(e));
+    }
+  }
+
+  static String _tidyReason(Object e) {
+    if (e is TimeoutException) return 'Tidying took too long';
+    if (e is SocketException || e is http.ClientException) {
+      return 'No internet connection';
+    }
+    return 'Tidying failed';
+  }
+
+  /// Re-tidies a note from its original transcript.
+  Future<void> _retryTidy(int id) async {
+    final note = await _db.get(id);
+    String? error;
+    if (note == null) {
+      error = 'The note is gone';
+    } else {
+      final raw = note.transcript ?? note.body;
+      try {
+        final t = await _cloud.tidy(raw).timeout(const Duration(seconds: 30));
+        await _db.update(
+          note.copyWith(
+            title: t.title,
+            body: t.text,
+            transcript: () => t.text != raw ? raw : null,
+            tidyError: () => null,
+          ),
+        );
+        _log('retry tidy succeeded for note $id');
+      } catch (e) {
+        error = _tidyReason(e);
+        await _db.update(note.copyWith(tidyError: () => error));
+        _log('retry tidy failed for note $id: $e', error: true);
+      }
+    }
+    FlutterForegroundTask.sendDataToMain({
+      'type': Msg.retried,
+      'id': id,
+      'error': ?error,
+    });
+    await _stopIfUnneeded();
+  }
+
   static String _cloudReason(Object e) {
     if (e is TimeoutException) return 'The cloud took too long';
     if (e is SocketException || e is http.ClientException) {
@@ -467,10 +537,14 @@ class VoiceTaskHandler extends TaskHandler {
       if (text.isEmpty) {
         error = 'Nothing to transcribe in this recording';
       } else {
+        final tidied = await _tidyText(text);
         var updated = note.copyWith(
-          title: makeTitle(text),
-          body: text,
+          title: tidied?.title ?? makeTitle(text),
+          body: tidied?.text ?? text,
           error: () => null,
+          transcript: () =>
+              tidied?.text != null && tidied!.text != text ? text : null,
+          tidyError: () => tidied?.error,
         );
         // The recording was only kept so the note could be retried.
         if (!_settings.keepAudio) {
@@ -698,13 +772,20 @@ class VoiceTaskHandler extends TaskHandler {
         }
       }
       final failed = result.error;
+      final tidied = failed == null ? await _tidyText(result.text) : null;
       final note = Note(
-        title: failed != null ? 'Not transcribed' : makeTitle(result.text),
-        body: result.text,
+        title: failed != null
+            ? 'Not transcribed'
+            : tidied?.title ?? makeTitle(result.text),
+        body: tidied?.text ?? result.text,
         createdAt: DateTime.now(),
         durationMs: result.durationMs,
         audioPath: audioPath,
         error: failed,
+        transcript: tidied != null && tidied.text != result.text
+            ? result.text
+            : null,
+        tidyError: tidied?.error,
       );
       final id = await _db.insert(note);
       if (failed != null) {

@@ -327,17 +327,21 @@ class VoiceController extends ChangeNotifier {
 
   void stopCapture() => FlutterForegroundTask.sendDataToTask({'cmd': Msg.stop});
 
-  /// Re-transcribes a note that failed, with the engine selected now.
-  Future<void> retry(int noteId) async {
+  /// Re-transcribes a note that failed, with the engine selected now; or,
+  /// with [tidy], re-tidies a note whose tidying failed.
+  Future<void> retry(int noteId, {bool tidy = false}) async {
     retrying.add(noteId);
     notifyListeners();
-    _addLog('retry note $noteId');
+    _addLog('retry ${tidy ? 'tidy of ' : ''}note $noteId');
     if (await FlutterForegroundTask.isRunningService) {
-      FlutterForegroundTask.sendDataToTask({'cmd': Msg.retry, 'id': noteId});
+      FlutterForegroundTask.sendDataToTask({
+        'cmd': tidy ? Msg.retryTidy : Msg.retry,
+        'id': noteId,
+      });
       return;
     }
     await FlutterForegroundTask.saveData(
-      key: Msg.pendingRetryKey,
+      key: tidy ? Msg.pendingRetryTidyKey : Msg.pendingRetryKey,
       value: noteId,
     );
     if (!await _startService()) {
