@@ -10,6 +10,7 @@ class Note {
     this.error,
     this.transcript,
     this.tidyError,
+    this.tags = const [],
   });
 
   final int? id;
@@ -35,6 +36,9 @@ class Note {
   /// retried.
   final String? tidyError;
 
+  /// Lower-case tags ("tag it work").
+  final List<String> tags;
+
   Note copyWith({
     String? title,
     String? body,
@@ -42,6 +46,7 @@ class Note {
     String? Function()? error,
     String? Function()? transcript,
     String? Function()? tidyError,
+    List<String>? tags,
   }) => Note(
     id: id,
     title: title ?? this.title,
@@ -53,6 +58,7 @@ class Note {
     error: error == null ? this.error : error(),
     transcript: transcript == null ? this.transcript : transcript(),
     tidyError: tidyError == null ? this.tidyError : tidyError(),
+    tags: tags ?? this.tags,
   );
 
   /// The same note with its recording reference dropped.
@@ -66,6 +72,7 @@ class Note {
     error: error,
     transcript: transcript,
     tidyError: tidyError,
+    tags: tags,
   );
 
   Map<String, Object?> toMap() => {
@@ -79,6 +86,7 @@ class Note {
     'error': error,
     'transcript': transcript,
     'tidy_error': tidyError,
+    'tags': tags.join(','),
   };
 
   factory Note.fromMap(Map<String, Object?> m) => Note(
@@ -92,5 +100,9 @@ class Note {
     error: m['error'] as String?,
     transcript: m['transcript'] as String?,
     tidyError: m['tidy_error'] as String?,
+    tags: ((m['tags'] as String?) ?? '')
+        .split(',')
+        .where((t) => t.isNotEmpty)
+        .toList(),
   );
 }

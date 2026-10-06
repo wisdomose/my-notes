@@ -219,14 +219,38 @@ class _NoteScreenState extends State<NoteScreen> {
                     else if (_note.failed)
                       _failedPanel()
                     else ...[
-                      SelectableText(
-                        _showOriginal ? _note.transcript! : _note.body,
-                        style: sans(
-                          18,
-                          height: 1.6,
-                          color: _showOriginal ? C.textSoft : C.text,
+                      if (_note.tags.isNotEmpty) ...[
+                        Wrap(
+                          spacing: 8,
+                          runSpacing: 8,
+                          children: [
+                            for (final t in _note.tags)
+                              Container(
+                                padding: const EdgeInsets.symmetric(
+                                  horizontal: 10,
+                                  vertical: 4,
+                                ),
+                                decoration: BoxDecoration(
+                                  color: C.surface,
+                                  borderRadius: BorderRadius.circular(12),
+                                ),
+                                child: Text('#$t', style: mono(13)),
+                              ),
+                          ],
                         ),
-                      ),
+                        const SizedBox(height: 16),
+                      ],
+                      if (!_showOriginal && _isChecklist(_note.body))
+                        _checklist()
+                      else
+                        SelectableText(
+                          _showOriginal ? _note.transcript! : _note.body,
+                          style: sans(
+                            18,
+                            height: 1.6,
+                            color: _showOriginal ? C.textSoft : C.text,
+                          ),
+                        ),
                       if (_note.tidyError != null) _tidyFailedBar(),
                       if (_note.transcript != null)
                         Align(
@@ -254,6 +278,74 @@ class _NoteScreenState extends State<NoteScreen> {
         ),
       ),
     );
+  }
+
+  static final _box = RegExp(r'^(\s*)- \[( |x|X)\] (.*)$');
+  static bool _isChecklist(String body) =>
+      body.split('\n').any((l) => _box.hasMatch(l));
+
+  /// "- [ ] item" lines as tappable tick boxes; other lines as text.
+  Widget _checklist() {
+    final lines = _note.body.split('\n');
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        for (var i = 0; i < lines.length; i++)
+          if (_box.firstMatch(lines[i]) case final m?)
+            InkWell(
+              onTap: () => _toggle(i, m),
+              borderRadius: BorderRadius.circular(8),
+              child: ConstrainedBox(
+                constraints: const BoxConstraints(minHeight: 44),
+                child: Row(
+                  children: [
+                    Checkbox(
+                      value: m.group(2) != ' ',
+                      onChanged: (_) => _toggle(i, m),
+                      activeColor: C.accent,
+                      checkColor: C.bg,
+                      side: const BorderSide(color: C.faint, width: 2),
+                    ),
+                    const SizedBox(width: 4),
+                    Expanded(
+                      child: Text(
+                        m.group(3)!,
+                        style:
+                            sans(
+                              18,
+                              height: 1.4,
+                              color: m.group(2) != ' ' ? C.muted : C.text,
+                            ).copyWith(
+                              decoration: m.group(2) != ' '
+                                  ? TextDecoration.lineThrough
+                                  : null,
+                              decorationColor: C.muted,
+                            ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+            )
+          else if (lines[i].trim().isNotEmpty)
+            Padding(
+              padding: const EdgeInsets.symmetric(vertical: 6),
+              child: Text(lines[i], style: sans(18, height: 1.6)),
+            ),
+      ],
+    );
+  }
+
+  Future<void> _toggle(int index, RegExpMatch m) async {
+    final lines = _note.body.split('\n');
+    final done = m.group(2) != ' ';
+    lines[index] = '${m.group(1)}- [${done ? ' ' : 'x'}] ${m.group(3)}';
+    final updated = _note.copyWith(body: lines.join('\n'));
+    setState(() {
+      _note = updated;
+      _body.text = updated.body;
+    });
+    await services.db.update(updated);
   }
 
   /// Tidying failed: the note shows the raw transcript; offer a retry.

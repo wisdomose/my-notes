@@ -14,6 +14,7 @@ import 'package:sherpa_onnx/sherpa_onnx.dart' as so;
 import '../data/note.dart';
 import '../data/notes_db.dart';
 import '../data/settings.dart';
+import '../util/commands.dart';
 import '../util/log_file.dart';
 import '../util/memory.dart';
 import '../util/text.dart';
@@ -772,22 +773,57 @@ class VoiceTaskHandler extends TaskHandler {
         }
       }
       final failed = result.error;
-      final tidied = failed == null ? await _tidyText(result.text) : null;
-      final note = Note(
-        title: failed != null
-            ? 'Not transcribed'
-            : tidied?.title ?? makeTitle(result.text),
-        body: tidied?.text ?? result.text,
-        createdAt: DateTime.now(),
-        durationMs: result.durationMs,
-        audioPath: audioPath,
-        error: failed,
-        transcript: tidied != null && tidied.text != result.text
-            ? result.text
-            : null,
-        tidyError: tidied?.error,
-      );
-      final id = await _db.insert(note);
+      // Spoken commands ("tag it work", "make it a checklist", "add this
+      // to my last note") are matched in code and removed from the text.
+      final cmds = failed == null ? parseCommands(result.text) : null;
+      final spoken = cmds != null && cmds.text.isNotEmpty
+          ? cmds.text
+          : result.text;
+      if (cmds != null && cmds.any) {
+        _log(
+          'commands: ${[if (cmds.append) 'append', if (cmds.checklist) 'checklist', if (cmds.remind) 'remind', ...cmds.tags.map((t) => 'tag:$t')].join(', ')}',
+        );
+      }
+      final tidied = failed == null ? await _tidyText(spoken) : null;
+      var body = tidied?.text ?? spoken;
+      if (cmds?.checklist ?? false) body = toChecklist(body);
+      final last = (cmds?.append ?? false) ? await _db.latest() : null;
+      final Note note;
+      final int id;
+      if (last != null && !last.failed) {
+        // "Add this to my last note": extend it instead of a new note.
+        note = last.copyWith(
+          body: '${last.body}\n\n$body',
+          transcript: () => last.transcript == null && tidied?.text == null
+              ? null
+              : '${last.transcript ?? last.body}\n\n$spoken',
+          tags: {...last.tags, ...cmds!.tags}.toList(),
+        );
+        await _db.update(note);
+        id = last.id!;
+        _log('added to note $id');
+        // The appended part's recording isn't attached to any note.
+        if (audioPath != null) {
+          await File(audioPath).delete().catchError((_) => File(audioPath!));
+        }
+      } else {
+        note = Note(
+          title: failed != null
+              ? 'Not transcribed'
+              : tidied?.title ?? makeTitle(spoken),
+          body: body,
+          createdAt: DateTime.now(),
+          durationMs: result.durationMs,
+          audioPath: audioPath,
+          error: failed,
+          transcript: tidied?.text != null && tidied!.text != spoken
+              ? result.text
+              : null,
+          tidyError: tidied?.error,
+          tags: cmds?.tags ?? const [],
+        );
+        id = await _db.insert(note);
+      }
       if (failed != null) {
         _log(
           'note $id saved NOT transcribed (${result.durationMs ~/ 1000} s): '

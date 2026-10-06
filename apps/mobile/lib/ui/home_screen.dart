@@ -610,6 +610,10 @@ class _NoteCard extends StatelessWidget {
                       'Voice · ${formatDuration(note.durationMs)}',
                       style: mono(12),
                     ),
+                    for (final t in note.tags.take(3)) ...[
+                      const SizedBox(width: 8),
+                      Text('#$t', style: mono(12, color: C.accent)),
+                    ],
                   ],
                 ),
               ],
