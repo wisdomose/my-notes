@@ -28,9 +28,12 @@ class SavedEvent {
 
 /// A retry finished: [error] is null when the note now has its text.
 class RetryEvent {
-  const RetryEvent(this.noteId, this.error);
+  const RetryEvent(this.noteId, this.error, {this.auto = false});
   final int noteId;
   final String? error;
+
+  /// Made by "Retry when back online", not the Retry button.
+  final bool auto;
 }
 
 /// UI-side handle on the background voice service.
@@ -149,7 +152,13 @@ class VoiceController extends ChangeNotifier {
         );
       case Msg.retried:
         retrying.remove(data['id']);
-        _retried.add(RetryEvent(data['id'] as int, data['error'] as String?));
+        _retried.add(
+          RetryEvent(
+            data['id'] as int,
+            data['error'] as String?,
+            auto: data['auto'] == true,
+          ),
+        );
       case Msg.nothing:
         _nothing.add(null);
       case Msg.error:

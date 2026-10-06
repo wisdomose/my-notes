@@ -16,7 +16,7 @@ class NotesDb {
     final dir = await getDatabasesPath();
     final db = await openDatabase(
       p.join(dir, 'notes.db'),
-      version: 5,
+      version: 6,
       onCreate: (db, _) => db.execute('''
         CREATE TABLE notes (
           id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -30,7 +30,9 @@ class NotesDb {
           transcript TEXT,
           tidy_error TEXT,
           tags TEXT NOT NULL DEFAULT '',
-          remind_at INTEGER
+          remind_at INTEGER,
+          auto_retries INTEGER NOT NULL DEFAULT 0,
+          retried_online INTEGER NOT NULL DEFAULT 0
         )
       '''),
       onUpgrade: (db, from, _) async {
@@ -52,6 +54,15 @@ class NotesDb {
         // v5: reminders ("remind me tomorrow at 9").
         if (from < 5) {
           await db.execute('ALTER TABLE notes ADD COLUMN remind_at INTEGER');
+        }
+        // v6: "Retry when back online".
+        if (from < 6) {
+          await db.execute(
+            'ALTER TABLE notes ADD COLUMN auto_retries INTEGER NOT NULL DEFAULT 0',
+          );
+          await db.execute(
+            'ALTER TABLE notes ADD COLUMN retried_online INTEGER NOT NULL DEFAULT 0',
+          );
         }
       },
     );
@@ -83,6 +94,19 @@ class NotesDb {
   Future<Note?> latest() async {
     final rows = await _db.query('notes', orderBy: 'created_at DESC', limit: 1);
     return rows.isEmpty ? null : Note.fromMap(rows.first);
+  }
+
+  /// Notes that failed (transcription or tidying) with fewer than [max]
+  /// automatic retries; the caller decides which failures are worth it.
+  Future<List<Note>> failedForAutoRetry(int max) async {
+    final rows = await _db.query(
+      'notes',
+      where:
+          '(error IS NOT NULL OR tidy_error IS NOT NULL) AND auto_retries < ?',
+      whereArgs: [max],
+      orderBy: 'created_at ASC',
+    );
+    return rows.map(Note.fromMap).toList();
   }
 
   Future<List<Note>> list({String query = ''}) async {

@@ -218,7 +218,80 @@ class VoiceTaskHandler extends TaskHandler {
   }
 
   @override
-  void onRepeatEvent(DateTime timestamp) => _reportMicHealth();
+  void onRepeatEvent(DateTime timestamp) {
+    _reportMicHealth();
+    if (++_autoTicks % 3 == 0) _autoRetry();
+  }
+
+  // "Retry when back online": every 30 s, notes that failed for lack of a
+  // connection are retried once the API's host resolves again. At most
+  // [_maxAutoRetries] tries per note, a minute or more apart; Retry on the
+  // note still works after that.
+  static const _maxAutoRetries = 3;
+  int _autoTicks = 0;
+  bool _autoBusy = false;
+  final _lastAutoTry = <int, DateTime>{};
+
+  /// Failures a connection can fix (not an on-device model's, and not a
+  /// reminder time the API couldn't work out).
+  static const _cloudFailures = {
+    _noInternet,
+    'The cloud took too long',
+    'Too many notes right now, try again in a minute',
+    'The cloud couldn’t transcribe it',
+  };
+  static const _tidyFailures = {
+    _noInternet,
+    'Tidying took too long',
+    'Tidying failed',
+  };
+  static const _noInternet = 'No internet connection';
+
+  Future<void> _autoRetry() async {
+    final engine = _engine;
+    if (!_settings.retryOnline || _autoBusy || engine == null) return;
+    if (engine.state != EngineState.idle) return;
+    _autoBusy = true;
+    try {
+      final now = DateTime.now();
+      final cloud = _settings.engine == AppSettings.engineCloud;
+      final due = [
+        for (final n in await _db.failedForAutoRetry(_maxAutoRetries))
+          if ((n.failed
+                  ? cloud && _cloudFailures.contains(n.error)
+                  : _tidyFailures.contains(n.tidyError)) &&
+              now.difference(_lastAutoTry[n.id] ?? DateTime(0)) >
+                  const Duration(minutes: 1))
+            n,
+      ];
+      if (due.isEmpty || !await _online()) return;
+      for (final n in due) {
+        if (engine.state != EngineState.idle) break;
+        final id = n.id!;
+        _lastAutoTry[id] = DateTime.now();
+        await _db.update(n.copyWith(autoRetries: n.autoRetries + 1));
+        _log('back online: retrying note $id (try ${n.autoRetries + 1})');
+        n.failed
+            ? await _retry(id, auto: true)
+            : await _retryTidy(id, auto: true);
+      }
+    } catch (e) {
+      _log('retry when back online failed: $e', error: true);
+    } finally {
+      _autoBusy = false;
+    }
+  }
+
+  /// Whether the API's host resolves (a cheap "are we online?").
+  Future<bool> _online() async {
+    try {
+      final r = await InternetAddress.lookup(Uri.parse(apiBaseUrl).host)
+          .timeout(const Duration(seconds: 5));
+      return r.isNotEmpty;
+    } catch (_) {
+      return false;
+    }
+  }
 
   Future<void> _reportMicHealth() async {
     final chunks = _healthChunks;
@@ -497,13 +570,13 @@ class VoiceTaskHandler extends TaskHandler {
   static String _tidyReason(Object e) {
     if (e is TimeoutException) return 'Tidying took too long';
     if (e is SocketException || e is http.ClientException) {
-      return 'No internet connection';
+      return _noInternet;
     }
     return 'Tidying failed';
   }
 
   /// Re-tidies a note from its original transcript.
-  Future<void> _retryTidy(int id) async {
+  Future<void> _retryTidy(int id, {bool auto = false}) async {
     final note = await _db.get(id);
     String? error;
     if (note == null) {
@@ -525,6 +598,7 @@ class VoiceTaskHandler extends TaskHandler {
           transcript: text == null ? null : () => text != raw ? raw : null,
           tidyError: () => error,
           remindAt: t.remindAt == null ? null : () => t.remindAt,
+          retriedOnline: auto && error == null ? true : null,
         ),
       );
       await _scheduleReminder(id, t);
@@ -539,6 +613,7 @@ class VoiceTaskHandler extends TaskHandler {
       'type': Msg.retried,
       'id': id,
       'error': ?error,
+      'auto': auto,
     });
     await _stopIfUnneeded();
   }
@@ -546,7 +621,7 @@ class VoiceTaskHandler extends TaskHandler {
   static String _cloudReason(Object e) {
     if (e is TimeoutException) return 'The cloud took too long';
     if (e is SocketException || e is http.ClientException) {
-      return 'No internet connection';
+      return _noInternet;
     }
     if (e is CloudError && e.message.startsWith('HTTP 429')) {
       return 'Too many notes right now, try again in a minute';
@@ -555,7 +630,7 @@ class VoiceTaskHandler extends TaskHandler {
   }
 
   /// Re-transcribes a note that failed, with the engine chosen now.
-  Future<void> _retry(int id) async {
+  Future<void> _retry(int id, {bool auto = false}) async {
     final note = await _db.get(id);
     final audio = note?.audioPath;
     if (note == null || audio == null || !File(audio).existsSync()) {
@@ -563,6 +638,7 @@ class VoiceTaskHandler extends TaskHandler {
         'type': Msg.retried,
         'id': id,
         'error': 'The recording for this note is gone',
+        'auto': auto,
       });
       return;
     }
@@ -598,6 +674,7 @@ class VoiceTaskHandler extends TaskHandler {
           tidyError: () => tidied?.error,
           tags: {...note.tags, ...cmds.tags}.toList(),
           remindAt: () => tidied?.remindAt,
+          retriedOnline: auto ? true : null,
         );
         // The recording was only kept so the note could be retried.
         if (!_settings.keepAudio) {
@@ -616,6 +693,7 @@ class VoiceTaskHandler extends TaskHandler {
       'type': Msg.retried,
       'id': id,
       'error': ?error,
+      'auto': auto,
     });
     await _stopIfUnneeded();
   }

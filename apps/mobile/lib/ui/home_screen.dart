@@ -152,6 +152,13 @@ class _HomeScreenState extends State<HomeScreen> with WidgetsBindingObserver {
   Future<void> _onRetried(RetryEvent e) async {
     await _load();
     if (!mounted) return;
+    if (e.auto) {
+      // The note itself shows what happened; only a success is news.
+      if (e.error == null && _foreground) {
+        showError(context, 'Transcribed when back online');
+      }
+      return;
+    }
     if (e.error != null) {
       showError(context, 'Still couldn’t transcribe: ${e.error}');
     } else if (_foreground) {

@@ -12,6 +12,8 @@ class Note {
     this.tidyError,
     this.tags = const [],
     this.remindAt,
+    this.autoRetries = 0,
+    this.retriedOnline = false,
   });
 
   final int? id;
@@ -43,6 +45,12 @@ class Note {
   /// When the note's reminder fires ("remind me tomorrow at 9 …").
   final DateTime? remindAt;
 
+  /// Automatic retries made once back online ("Retry when back online").
+  final int autoRetries;
+
+  /// It was transcribed (or tidied) by such a retry.
+  final bool retriedOnline;
+
   Note copyWith({
     String? title,
     String? body,
@@ -52,6 +60,8 @@ class Note {
     String? Function()? tidyError,
     List<String>? tags,
     DateTime? Function()? remindAt,
+    int? autoRetries,
+    bool? retriedOnline,
   }) => Note(
     id: id,
     title: title ?? this.title,
@@ -65,6 +75,8 @@ class Note {
     tidyError: tidyError == null ? this.tidyError : tidyError(),
     tags: tags ?? this.tags,
     remindAt: remindAt == null ? this.remindAt : remindAt(),
+    autoRetries: autoRetries ?? this.autoRetries,
+    retriedOnline: retriedOnline ?? this.retriedOnline,
   );
 
   /// The same note with its recording reference dropped.
@@ -80,6 +92,8 @@ class Note {
     tidyError: tidyError,
     tags: tags,
     remindAt: remindAt,
+    autoRetries: autoRetries,
+    retriedOnline: retriedOnline,
   );
 
   Map<String, Object?> toMap() => {
@@ -95,6 +109,8 @@ class Note {
     'tidy_error': tidyError,
     'tags': tags.join(','),
     'remind_at': remindAt?.millisecondsSinceEpoch,
+    'auto_retries': autoRetries,
+    'retried_online': retriedOnline ? 1 : 0,
   };
 
   factory Note.fromMap(Map<String, Object?> m) => Note(
@@ -116,5 +132,7 @@ class Note {
       final int ms => DateTime.fromMillisecondsSinceEpoch(ms),
       _ => null,
     },
+    autoRetries: m['auto_retries'] as int? ?? 0,
+    retriedOnline: m['retried_online'] == 1,
   );
 }

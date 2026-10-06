@@ -14,6 +14,7 @@ class AppSettings {
     this.overlayEnabled = true,
     this.engine = engineCloud,
     this.tidyEnabled = true,
+    this.retryOnline = false,
   });
 
   bool wakeEnabled;
@@ -36,6 +37,9 @@ class AppSettings {
 
   /// Tidy notes up (title, cleanup, lists) with AI through the API.
   bool tidyEnabled;
+
+  /// Retry notes that failed for lack of a connection once it's back.
+  bool retryOnline;
   static const engineCloud = 'cloud';
   static const engineDevice = 'device';
   static const engineParakeet = 'parakeet';
@@ -66,6 +70,7 @@ class AppSettings {
       overlayEnabled: await p.getBool('overlayEnabled') ?? true,
       engine: await p.getString('engine') ?? engineCloud,
       tidyEnabled: await p.getBool('tidyEnabled') ?? true,
+      retryOnline: await p.getBool('retryOnline') ?? false,
     );
   }
 
@@ -79,6 +84,7 @@ class AppSettings {
     await p.setBool('overlayEnabled', overlayEnabled);
     await p.setString('engine', engine);
     await p.setBool('tidyEnabled', tidyEnabled);
+    await p.setBool('retryOnline', retryOnline);
   }
 
   String get sensitivityLabel => sensitivity < 34

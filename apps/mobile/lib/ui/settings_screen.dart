@@ -170,6 +170,10 @@ class _SettingsScreenState extends State<SettingsScreen>
                 _s.tidyEnabled = v;
                 _changed();
               }),
+              _switchRow('Retry when back online', _s.retryOnline, (v) {
+                _s.retryOnline = v;
+                _changed();
+              }),
               if (_exactReminders == false)
                 _linkRow('Allow reminders on time', Reminders.requestExact),
             ]),

@@ -202,6 +202,7 @@ class _NoteScreenState extends State<NoteScreen> {
                         '${formatDate(_note.createdAt)} · ${formatClock(_note.createdAt)}',
                         if (_note.source == 'voice')
                           'Voice note · ${formatDuration(_note.durationMs)}',
+                        if (_note.retriedOnline) 'Transcribed when back online',
                       ].join(' · '),
                       style: mono(12),
                     ),
