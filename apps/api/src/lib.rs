@@ -136,9 +136,12 @@ async fn transcribe(
 #[derive(serde::Deserialize)]
 struct TidyRequest {
     text: String,
+    /// The phone's local time, for reminders ("2026-10-06T14:05:00+01:00 (Tuesday)").
+    #[serde(default)]
+    now: Option<String>,
 }
 
-/// `POST /v1/tidy` `{"text": "<transcript>"}` → `{"title", "text"}`.
+/// `POST /v1/tidy` `{"text", "now"?}` → `{"title", "text", "reminder"}` (reminder is null unless the note asks for one).
 async fn tidy_note(
     State(state): State<AppState>,
     ConnectInfo(peer): ConnectInfo<SocketAddr>,
@@ -169,7 +172,8 @@ async fn tidy_note(
             "Text must be 1 to 20,000 characters",
         );
     }
-    match tidier.tidy(text).await {
+    let now = req.now.as_deref().filter(|n| n.len() <= 64);
+    match tidier.tidy(text, now).await {
         Ok(t) => {
             tracing::info!(%ip, chars = text.len(), "tidied");
             Json(t).into_response()

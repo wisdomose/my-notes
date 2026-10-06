@@ -21,15 +21,25 @@ async fn fake_openai(
     Json(body): Json<Value>,
 ) -> (StatusCode, Json<Value>) {
     assert_eq!(headers["authorization"], "Bearer sk-test");
-    let transcript = body["messages"][1]["content"].as_str().unwrap().to_string();
+    let user = body["messages"][1]["content"].as_str().unwrap().to_string();
+    let transcript = user.rsplit("Transcript: ").next().unwrap().to_string();
     *seen.lock().unwrap() = Some(body);
     if transcript == "busy" {
         return (StatusCode::TOO_MANY_REQUESTS, Json(json!({"error": {}})));
     }
-    let content = json!({
-        "title": "Call Peter About the Car.",
-        "text": "Call Peter about the car tomorrow."
-    })
+    let content = if transcript.starts_with("remind me") {
+        json!({
+            "title": "Pay The Electricity Bill",
+            "text": "Remind me on Monday to pay the electricity bill.",
+            "reminder": { "at": "2026-10-12T09:00:00+01:00", "what": "Pay the electricity bill" }
+        })
+    } else {
+        json!({
+            "title": "Call Peter About the Car.",
+            "text": "Call Peter about the car tomorrow.",
+            "reminder": null
+        })
+    }
     .to_string();
     (
         StatusCode::OK,
@@ -109,4 +119,37 @@ async fn reports_errors_and_validates_input() {
 
     let (no_key, _) = start(false).await;
     assert_eq!(tidy(&no_key, json!({ "text": "hello" })).await.0, 503);
+}
+
+#[tokio::test]
+async fn reminders_use_the_phones_time() {
+    let (base, seen) = start(true).await;
+    let (code, body) = tidy(
+        &base,
+        json!({
+            "text": "remind me on Monday to pay the electricity bill",
+            "now": "2026-10-06T14:05:00+01:00 (Tuesday)"
+        }),
+    )
+    .await;
+    assert_eq!(code, 200, "{body}");
+    assert_eq!(body["title"], "Pay the electricity bill");
+    assert_eq!(body["reminder"]["at"], "2026-10-12T09:00:00+01:00");
+    assert_eq!(body["reminder"]["what"], "Pay the electricity bill");
+    let sent = seen.lock().unwrap().clone().unwrap();
+    assert_eq!(
+        sent["messages"][1]["content"],
+        "Current local time: 2026-10-06T14:05:00+01:00 (Tuesday)\nTranscript: remind me on Monday to pay the electricity bill"
+    );
+    assert_eq!(
+        sent["response_format"]["json_schema"]["schema"]["required"],
+        json!(["title", "text", "reminder"])
+    );
+}
+
+#[tokio::test]
+async fn no_reminder_is_null() {
+    let (base, _) = start(true).await;
+    let (_, body) = tidy(&base, json!({ "text": "call peter" })).await;
+    assert!(body["reminder"].is_null());
 }
