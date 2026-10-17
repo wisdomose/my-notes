@@ -42,7 +42,7 @@ last=$(cat "$STATE_DIR/last-digest" 2>/dev/null || true)
 [[ $digest == "$last" ]] && exit 0
 
 # Keep the token out of the process list: pass the header via stdin.
-if curl -fsS -H @- -H "Accept: application/json" \
+if curl -fsS -X POST -H @- -H "Accept: application/json" \
   "$API/deploy?uuid=$APP_UUID&force=false" > /dev/null <<< "Authorization: Bearer $(cat "$TOKEN_FILE")"; then
   echo "$digest" > "$STATE_DIR/last-digest"
   log "deploy requested for $IMAGE:$TAG @ $digest"
